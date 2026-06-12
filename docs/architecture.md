@@ -10,6 +10,11 @@ TsunagariCare Web Dashboard
 ↓
 Family / Caregiver
 
+Notes:
+
+- The Web Dashboard subscribes to Firestore collections in realtime (onSnapshot): `robots`, `devices`, `alerts`, `care_logs`.
+- Robot and modules write status/alerts to Firestore; the dashboard updates immediately via realtime listeners.
+
 Smart home command flow:
 
 Web Dashboard
