@@ -1,48 +1,67 @@
+/* Modern smart-care dashboard styles */
 :root {
-  --bg: #f6fbff;
+  --bg: #f4f7fb;
   --card: #ffffff;
-  --primary: #0b6e4f;
   --muted: #6b7280;
-  --danger: #e11d48;
+  --primary: #0b6e4f;
+  --accent: #0ea5a4;
+  --danger: #ef4444;
   --warning: #f59e0b;
+  --glass: rgba(255, 255, 255, 0.6);
 }
 * {
   box-sizing: border-box;
-  font-family:
-    Inter,
-    Segoe UI,
-    Arial,
-    sans-serif;
+}
+html,
+body {
+  height: 100%;
 }
 body {
   margin: 0;
-  background: var(--bg);
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    "Helvetica Neue",
+    Arial;
+  background: linear-gradient(180deg, #f7fbff 0%, var(--bg) 100%);
   color: #0f172a;
+  -webkit-font-smoothing: antialiased;
 }
-.topbar {
-  padding: 12px 16px;
-  background: linear-gradient(90deg, #0b6e4f, #106f5a);
-  color: #fff;
-}
-.topbar-inner {
+.header {
+  padding: 20px 24px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  max-width: 1100px;
+  max-width: 1200px;
   margin: 0 auto;
 }
-.logo {
+.brand {
   display: flex;
-  gap: 12px;
+  gap: 14px;
   align-items: center;
 }
-.logo h1 {
+.brand .logo {
+  width: 52px;
+  height: 52px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, var(--primary), #066a5a);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 700;
+}
+.brand h1 {
   margin: 0;
   font-size: 20px;
 }
-.subtitle {
-  opacity: 0.95;
+.brand .subtitle {
   font-size: 12px;
+  color: var(--muted);
 }
 .top-actions {
   display: flex;
@@ -50,92 +69,302 @@ body {
   align-items: center;
 }
 .container {
-  padding: 18px;
-  max-width: 1100px;
-  margin: 0 auto;
+  max-width: 1200px;
+  margin: 18px auto;
+  padding: 0 20px;
 }
-.overview .cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 12px;
+/* Hero / Status row */
+.hero {
+  display: flex;
+  gap: 16px;
+  align-items: stretch;
   margin-bottom: 16px;
 }
-.overview-card {
-  padding: 14px;
-  text-align: center;
-}
-.card-title {
-  font-size: 13px;
-  color: var(--muted);
-}
-.card-value {
-  font-size: 18px;
-  font-weight: 600;
-  margin-top: 6px;
-}
-.grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 16px;
-}
-.card {
-  background: var(--card);
-  padding: 16px;
-  border-radius: 8px;
-  box-shadow: 0 1px 6px rgba(2, 6, 23, 0.06);
-}
-.btn-row {
+.status-cards {
   display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-top: 8px;
+  gap: 12px;
+  flex: 1;
 }
-.btn-col {
+.status-card {
+  background: var(--card);
+  padding: 14px;
+  border-radius: 12px;
+  box-shadow: 0 6px 18px rgba(11, 110, 79, 0.06);
   display: flex;
   flex-direction: column;
+  justify-content: space-between;
+  min-width: 140px;
+}
+.status-card .meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.status-card .icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--accent), #06b6d4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+}
+.status-card .value {
+  font-size: 18px;
+  font-weight: 700;
+}
+.status-card .label {
+  font-size: 12px;
+  color: var(--muted);
+}
+.hero .brand-hero {
+  background: var(--card);
+  padding: 18px;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 280px;
+  box-shadow: 0 6px 18px rgba(2, 6, 23, 0.04);
+}
+.hero .brand-hero h2 {
+  margin: 0;
+  font-size: 18px;
+}
+.hero .brand-hero p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* Main layout */
+.main-grid {
+  display: grid;
+  grid-template-columns: 1fr 360px;
+  gap: 16px;
+}
+.left-column {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.right-column {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Robot profile */
+.robot-card {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  padding: 18px;
+  border-radius: 12px;
+  background: var(--card);
+  box-shadow: 0 8px 24px rgba(2, 6, 23, 0.04);
+}
+.robot-avatar {
+  width: 92px;
+  height: 92px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, var(--primary), #0b8771);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 28px;
+}
+.robot-meta {
+  flex: 1;
+}
+.robot-meta h3 {
+  margin: 0;
+}
+.robot-meta p {
+  margin: 6px 0;
+  color: var(--muted);
+}
+.robot-stats {
+  display: flex;
+  gap: 12px;
+  margin-top: 12px;
+}
+.robot-stat {
+  background: #f8fafb;
+  padding: 8px;
+  border-radius: 8px;
+  text-align: center;
+  min-width: 80px;
+}
+.robot-stat .num {
+  font-weight: 700;
+}
+
+/* Devices grid */
+.devices-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 12px;
+}
+.device-card {
+  background: linear-gradient(180deg, #fff, #fbfdff);
+  padding: 12px;
+  border-radius: 12px;
+  box-shadow: 0 6px 18px rgba(2, 6, 23, 0.04);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
   gap: 8px;
 }
-button {
-  padding: 8px 10px;
-  border-radius: 6px;
-  border: 1px solid #ddd;
-  background: #fff;
+.device-card .d-title {
+  font-weight: 700;
+}
+.device-toggle {
+  margin-left: auto;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: none;
+  background: #eef2f6;
+  color: #0f172a;
   cursor: pointer;
 }
-button.primary {
+.device-toggle.on {
   background: var(--primary);
   color: #fff;
-  border: none;
 }
-.footer {
+
+/* Health timeline */
+.timeline {
+  background: var(--card);
   padding: 12px;
-  text-align: center;
+  border-radius: 12px;
+  box-shadow: 0 6px 18px rgba(2, 6, 23, 0.04);
+}
+.timeline-item {
+  display: flex;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px dashed #eef2f6;
+}
+.timeline-item:last-child {
+  border-bottom: none;
+}
+.timeline-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  margin-top: 6px;
+}
+.timeline-content {
+  flex: 1;
+}
+.timeline-time {
+  font-size: 12px;
   color: var(--muted);
-  margin-top: 18px;
 }
-.status-normal {
-  color: #065f46;
+
+/* Alerts */
+.alert-card {
+  background: linear-gradient(90deg, #fff, #fff6f6);
+  padding: 12px;
+  border-radius: 12px;
+  box-shadow: 0 6px 18px rgba(2, 6, 23, 0.04);
 }
-.status-warning {
-  color: var(--warning);
+.alert-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px;
+  border-radius: 8px;
+  margin-bottom: 8px;
 }
-.status-emergency {
-  color: var(--danger);
+.alert-item .left {
+  display: flex;
+  gap: 12px;
+  align-items: center;
 }
-.device-item,
-.alert-item,
-.care-item {
-  padding: 8px;
+.alert-badge {
+  padding: 6px 8px;
+  border-radius: 8px;
+  color: #fff;
+  font-weight: 700;
+}
+.badge-normal {
+  background: #10b981;
+}
+.badge-warning {
+  background: var(--warning);
+}
+.badge-emergency {
+  background: var(--danger);
+}
+
+/* Commands list */
+.commands-list {
+  background: var(--card);
+  padding: 12px;
+  border-radius: 12px;
+  box-shadow: 0 6px 18px rgba(2, 6, 23, 0.04);
+}
+.commands-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px;
   border-bottom: 1px solid #f1f5f9;
 }
-.device-item .toggle {
-  margin-left: 8px;
+.cmd-status {
+  font-weight: 700;
+  padding: 6px 10px;
+  border-radius: 8px;
 }
-@media (max-width: 900px) {
-  .grid {
+.cmd-pending {
+  background: #f3f4f6;
+  color: #111;
+}
+.cmd-completed {
+  background: #ecfdf5;
+  color: #065f46;
+}
+.cmd-failed {
+  background: #fff1f2;
+  color: #9f1239;
+}
+
+/* Footer */
+.footer {
+  max-width: 1200px;
+  margin: 18px auto;
+  padding: 12px 20px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* responsiveness */
+@media (max-width: 1000px) {
+  .main-grid {
     grid-template-columns: 1fr;
   }
-  .topbar-inner {
-    padding: 0 8px;
+  .hero {
+    flex-direction: column;
+  }
+  .status-cards {
+    order: 2;
+  }
+  .brand-hero {
+    order: 1;
+  }
+}
+
+@media (max-width: 480px) {
+  .device-card {
+    padding: 10px;
+  }
+  .robot-avatar {
+    width: 72px;
+    height: 72px;
   }
 }
