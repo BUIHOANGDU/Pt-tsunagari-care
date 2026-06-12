@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>TsunagariCare Dashboard</title>
+    <link rel="stylesheet" href="src/css/style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <h1>TsunagariCare</h1>
+      <p class="subtitle">つながりケア — Demo Dashboard</p>
+    </header>
+
+    <main class="container">
+      <section class="grid">
+        <div class="card" id="overview-card">
+          <h2>Overview</h2>
+          <div id="system-name">TsunagariCare</div>
+          <div id="robot-status">
+            Robot: <span id="robot-status-text">—</span>
+          </div>
+          <div id="robot-battery">
+            Battery: <span id="robot-battery-text">—</span>%
+          </div>
+          <div id="last-active">
+            Last Active: <span id="robot-lastActive">—</span>
+          </div>
+          <div id="user-state">
+            User State: <span id="user-state-text">—</span>
+          </div>
+          <div id="alerts-today">
+            Alerts today: <span id="alerts-count">0</span>
+          </div>
+        </div>
+
+        <div class="card" id="robot-card">
+          <h2>Robot Chami</h2>
+          <div id="robot-info"></div>
+        </div>
+
+        <div class="card" id="devices-card">
+          <h2>Smart Home</h2>
+          <div id="devices-list"></div>
+        </div>
+
+        <div class="card" id="health-card">
+          <h2>Health Monitoring</h2>
+          <div id="care-logs"></div>
+          <div class="btn-row">
+            <button id="btn-medicine-done">Đã uống thuốc</button>
+            <button id="btn-medicine-missed">Chưa uống thuốc</button>
+            <button id="btn-ate">Đã ăn sáng</button>
+            <button id="btn-no-response">Không phản hồi</button>
+          </div>
+        </div>
+
+        <div class="card" id="alerts-card">
+          <h2>Alerts</h2>
+          <div id="alerts-list"></div>
+          <div class="btn-row">
+            <button id="btn-sim-fall">Simulate Fall</button>
+            <button id="btn-sim-robot-offline">Simulate Robot Offline</button>
+          </div>
+        </div>
+
+        <div class="card" id="demo-card">
+          <h2>Demo Mode</h2>
+          <div class="btn-col">
+            <button id="demo-robot-online">Simulate Robot Online</button>
+            <button id="demo-robot-offline">Simulate Robot Offline</button>
+            <button id="demo-low-battery">Simulate Low Battery</button>
+            <button id="demo-fall">Simulate Fall Detected</button>
+            <button id="demo-medicine-done">Simulate Medicine Done</button>
+            <button id="demo-no-response">Simulate No Response</button>
+            <button id="demo-toggle-light">
+              Simulate Light ON/OFF Command
+            </button>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">Demo for graduation project — TsunagariCare</footer>
+
+    <script src="src/js/firebase-config.example.js"></script>
+    <script src="src/js/firebase-service.js"></script>
+    <script src="src/js/dashboard.js"></script>
+    <script src="src/js/demo.js"></script>
+  </body>
+</html>

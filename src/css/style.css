@@ -1,0 +1,84 @@
+:root {
+  --bg: #f6fbff;
+  --card: #ffffff;
+  --primary: #0b6e4f;
+  --muted: #6b7280;
+  --danger: #e11d48;
+  --warning: #f59e0b;
+}
+* {
+  box-sizing: border-box;
+  font-family:
+    Inter,
+    Segoe UI,
+    Arial,
+    sans-serif;
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: #0f172a;
+}
+.topbar {
+  padding: 16px 24px;
+  background: linear-gradient(90deg, #0b6e4f, #106f5a);
+  color: #fff;
+}
+.container {
+  padding: 20px;
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+}
+.card {
+  background: var(--card);
+  padding: 16px;
+  border-radius: 8px;
+  box-shadow: 0 1px 4px rgba(2, 6, 23, 0.06);
+}
+.btn-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.btn-col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+button {
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid #ddd;
+  background: #fff;
+  cursor: pointer;
+}
+button.primary {
+  background: var(--primary);
+  color: #fff;
+  border: none;
+}
+.footer {
+  padding: 12px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.status-normal {
+  color: #065f46;
+}
+.status-warning {
+  color: var(--warning);
+}
+.status-emergency {
+  color: var(--danger);
+}
+
+@media (max-width: 600px) {
+  .topbar h1 {
+    font-size: 18px;
+  }
+}
