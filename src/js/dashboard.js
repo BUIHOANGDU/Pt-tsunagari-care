@@ -2,15 +2,25 @@
 FirebaseService.seedMockData && FirebaseService.seedMockData();
 
 function updateRobotSection(robot) {
+  // Update overview cards
   document.getElementById("robot-status-text").textContent =
     robot?.status || "offline";
   document.getElementById("robot-battery-text").textContent =
     robot?.battery != null ? robot.battery + "%" : "—";
-  renderRobotCard(robot || { name: "Chami", status: "offline", battery: 0 });
+
+  // Update robot profile display
+  const batteryDisplay = document.getElementById("robot-battery-display");
+  const statusDisplay = document.getElementById("robot-status-display");
+  if (batteryDisplay)
+    batteryDisplay.textContent =
+      robot?.battery != null ? robot.battery + "%" : "—%";
+  if (statusDisplay) statusDisplay.textContent = robot?.status || "offline";
 }
 
 function updateDevicesSection(devices) {
   document.getElementById("devices-count").textContent = devices.length || 0;
+  const devicesDisplay = document.getElementById("devices-display");
+  if (devicesDisplay) devicesDisplay.textContent = devices.length || 0;
   renderDevices(devices);
 }
 
@@ -23,28 +33,21 @@ function updateCareLogsSection(logs) {
   renderCareLogs(logs);
 }
 
-// render helpers
-function renderRobotCard(robot) {
-  const el = document.getElementById("robot-info");
-  el.innerHTML = "";
-  const title = document.createElement("div");
-  title.innerHTML = `<strong>${robot?.name || "Chami"}</strong> — <span class="${robot?.status === "online" ? "status-normal" : "status-warning"}">${robot?.status || "offline"}</span>`;
-  const batt = document.createElement("div");
-  batt.innerHTML = `<div>Battery: ${robot?.battery || 0}%</div><progress value="${robot?.battery || 0}" max="100"></progress>`;
-  el.appendChild(title);
-  el.appendChild(batt);
-}
-
+// Render helpers
 function renderDevices(devices) {
   const wrap = document.getElementById("devices-list");
   wrap.innerHTML = "";
   devices.forEach((d) => {
     const item = document.createElement("div");
     item.className = "device-item";
-    item.innerHTML = `<strong>${d.name}</strong> <small>(${d.room || ""})</small> — <span>${d.status || ""}</span> <button data-id="${d.id || d.deviceId || ""}" class="toggle">Toggle</button>`;
-    wrap.appendChild(item);
-  });
-  document.querySelectorAll(".device-item .toggle").forEach((btn) => {
+    const leftDiv = document.createElement("div");
+    leftDiv.className = "left";
+    leftDiv.innerHTML = `<strong>${d.name}</strong><small>${d.room || ""}</small>`;
+
+    const btn = document.createElement("button");
+    btn.className = "device-toggle";
+    btn.dataset.id = d.id || d.deviceId || "";
+    btn.textContent = (d.status === "on" ? "✓ " : "") + "Toggle";
     btn.onclick = async () => {
       const id = btn.dataset.id;
       await FirebaseService.createCommand({
@@ -56,26 +59,30 @@ function renderDevices(devices) {
       });
       alert("Command created (demo)");
     };
+
+    item.appendChild(leftDiv);
+    item.appendChild(btn);
+    wrap.appendChild(item);
   });
 }
 
 function renderAlerts(alerts) {
   const el = document.getElementById("alerts-list");
   el.innerHTML = "";
-  alerts.slice(0, 20).forEach((a) => {
+  if (!alerts || alerts.length === 0) {
+    el.innerHTML =
+      '<div style="padding: 12px; color: #6b7280; text-align: center; font-size: 0.9rem;">No alerts</div>';
+    return;
+  }
+  alerts.slice(0, 8).forEach((a) => {
     const row = document.createElement("div");
     row.className = "alert-item";
-    const levelClass =
-      a.level === "emergency"
-        ? "status-emergency"
-        : a.level === "warning"
-          ? "status-warning"
-          : "status-normal";
-    row.innerHTML = `<strong class="${levelClass}">${a.type}</strong> — ${a.message} <button class="close">Close</button>`;
-    row.querySelector(".close").onclick = () => {
-      a.status = "resolved";
-      alert("Marked resolved (demo only)");
-    };
+    row.innerHTML = `
+      <div class="left">
+        <strong>${a.type}</strong>
+        <small>${a.message || ""}</small>
+      </div>
+    `;
     el.appendChild(row);
   });
 }
@@ -83,11 +90,22 @@ function renderAlerts(alerts) {
 function renderCareLogs(logs) {
   const el = document.getElementById("care-logs");
   el.innerHTML = "";
-  logs.slice(0, 10).forEach((l) => {
-    const r = document.createElement("div");
-    r.className = "care-item";
-    r.textContent = `${l.type} — ${l.status} — ${l.message || ""}`;
-    el.appendChild(r);
+  if (!logs || logs.length === 0) {
+    el.innerHTML =
+      '<div style="padding: 12px; color: #6b7280; text-align: center; font-size: 0.9rem;">No logs</div>';
+    return;
+  }
+  logs.slice(0, 6).forEach((l) => {
+    const item = document.createElement("div");
+    item.className = "care-item";
+    item.innerHTML = `
+      <div class="timeline-dot"></div>
+      <div class="timeline-content">
+        <strong>${l.type}</strong>
+        <small class="timeline-time">${l.message || l.status}</small>
+      </div>
+    `;
+    el.appendChild(item);
   });
 }
 
@@ -96,21 +114,27 @@ function renderCommands(cmds) {
   const el = document.getElementById("commands-list");
   el.innerHTML = "";
   if (!cmds || cmds.length === 0) {
-    el.innerHTML = '<div class="care-item">No commands</div>';
+    el.innerHTML =
+      '<div style="padding: 12px; color: #6b7280; text-align: center; font-size: 0.9rem;">No commands</div>';
     return;
   }
-  cmds.forEach((c) => {
+  cmds.slice(0, 5).forEach((c) => {
     const row = document.createElement("div");
-    row.className = "care-item";
-    row.innerHTML = `<strong>${c.command}</strong> → ${c.targetId} — <em>${c.status}</em> <button data-id="${c.id}" class="cmd-complete">Mark Done</button>`;
+    row.className = "commands-item";
+    const statusClass =
+      c.status === "completed"
+        ? "cmd-completed"
+        : c.status === "failed"
+          ? "cmd-failed"
+          : "cmd-pending";
+    row.innerHTML = `
+      <div>
+        <strong>${c.command}</strong>
+        <small>${c.targetId || ""}</small>
+      </div>
+      <span class="cmd-status ${statusClass}">${c.status || "pending"}</span>
+    `;
     el.appendChild(row);
-  });
-  document.querySelectorAll(".cmd-complete").forEach((btn) => {
-    btn.onclick = async () => {
-      const id = btn.dataset.id;
-      await FirebaseService.updateCommandStatus(id, "completed");
-      alert("Command marked completed (demo)");
-    };
   });
 }
 
