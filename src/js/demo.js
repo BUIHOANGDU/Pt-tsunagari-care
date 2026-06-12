@@ -13,6 +13,9 @@ async function ensureRobot() {
   }
 }
 
+// seed mock data on load (local fallback)
+FirebaseService.seedMockData && FirebaseService.seedMockData();
+
 document.getElementById("demo-robot-online").onclick = async () => {
   await ensureRobot();
   await FirebaseService.setRobot("chami01", {

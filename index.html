@@ -8,8 +8,21 @@
   </head>
   <body>
     <header class="topbar">
-      <h1>TsunagariCare</h1>
-      <p class="subtitle">つながりケア — Demo Dashboard</p>
+      <div class="topbar-inner">
+        <div class="logo">
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+            <circle cx="12" cy="12" r="10" fill="#0b6e4f" />
+            <path d="M8 12c1.333-2 3.333-2 4 0 0 2-2 4-4 4s-2-2-2-4z" fill="#fff" opacity="0.9"/>
+          </svg>
+          <div class="brand">
+            <h1>TsunagariCare</h1>
+            <div class="subtitle">つながりケア — Demo Dashboard</div>
+          </div>
+        </div>
+        <nav class="top-actions">
+          <div id="user-badge">Demo Mode</div>
+        </nav>
+      </div>
     </header>
 
     <main class="container">
@@ -29,62 +42,77 @@
           <div id="user-state">
             User State: <span id="user-state-text">—</span>
           </div>
-          <div id="alerts-today">
-            Alerts today: <span id="alerts-count">0</span>
-          </div>
-        </div>
+          <main class="container">
+            <section class="overview">
+              <div class="cards">
+                <div class="card overview-card">
+                  <div class="card-title">Robot Status</div>
+                  <div class="card-value" id="robot-status-text">—</div>
+                </div>
+                <div class="card overview-card">
+                  <div class="card-title">Battery</div>
+                  <div class="card-value" id="robot-battery-text">—%</div>
+                </div>
+                <div class="card overview-card">
+                  <div class="card-title">User Health</div>
+                  <div class="card-value" id="user-state-text">—</div>
+                </div>
+                <div class="card overview-card">
+                  <div class="card-title">Alerts Today</div>
+                  <div class="card-value" id="alerts-count">0</div>
+                </div>
+                <div class="card overview-card">
+                  <div class="card-title">Devices</div>
+                  <div class="card-value" id="devices-count">0</div>
+                </div>
+              </div>
+            </section>
 
-        <div class="card" id="robot-card">
-          <h2>Robot Chami</h2>
-          <div id="robot-info"></div>
-        </div>
+            <section class="grid">
+              <div class="card" id="robot-card">
+                <h2>Robot Chami</h2>
+                <div id="robot-info"></div>
+              </div>
 
-        <div class="card" id="devices-card">
-          <h2>Smart Home</h2>
-          <div id="devices-list"></div>
-        </div>
+              <div class="card" id="devices-card">
+                <h2>Smart Home</h2>
+                <div id="devices-list"></div>
+              </div>
 
-        <div class="card" id="health-card">
-          <h2>Health Monitoring</h2>
-          <div id="care-logs"></div>
-          <div class="btn-row">
-            <button id="btn-medicine-done">Đã uống thuốc</button>
-            <button id="btn-medicine-missed">Chưa uống thuốc</button>
-            <button id="btn-ate">Đã ăn sáng</button>
-            <button id="btn-no-response">Không phản hồi</button>
-          </div>
-        </div>
+              <div class="card" id="health-card">
+                <h2>Health Monitoring</h2>
+                <div id="care-logs"></div>
+                <div class="btn-row">
+                  <button id="btn-medicine-done">Đã uống thuốc</button>
+                  <button id="btn-medicine-missed">Chưa uống thuốc</button>
+                  <button id="btn-ate">Đã ăn sáng</button>
+                  <button id="btn-no-response">Không phản hồi</button>
+                </div>
+              </div>
 
-        <div class="card" id="alerts-card">
-          <h2>Alerts</h2>
-          <div id="alerts-list"></div>
-          <div class="btn-row">
-            <button id="btn-sim-fall">Simulate Fall</button>
-            <button id="btn-sim-robot-offline">Simulate Robot Offline</button>
-          </div>
-        </div>
+              <div class="card" id="alerts-card">
+                <h2>Alerts</h2>
+                <div id="alerts-list"></div>
+                <div class="btn-row">
+                  <button id="btn-sim-fall">Tạo cảnh báo ngã</button>
+                  <button id="btn-sim-robot-offline">Tạo cảnh báo robot offline</button>
+                </div>
+              </div>
 
-        <div class="card" id="demo-card">
-          <h2>Demo Mode</h2>
-          <div class="btn-col">
-            <button id="demo-robot-online">Simulate Robot Online</button>
-            <button id="demo-robot-offline">Simulate Robot Offline</button>
-            <button id="demo-low-battery">Simulate Low Battery</button>
-            <button id="demo-fall">Simulate Fall Detected</button>
-            <button id="demo-medicine-done">Simulate Medicine Done</button>
-            <button id="demo-no-response">Simulate No Response</button>
-            <button id="demo-toggle-light">
-              Simulate Light ON/OFF Command
-            </button>
-          </div>
-        </div>
-      </section>
-    </main>
-
-    <footer class="footer">Demo for graduation project — TsunagariCare</footer>
-
-    <script src="src/js/firebase-config.example.js"></script>
-    <script src="src/js/firebase-service.js"></script>
+              <div class="card" id="demo-card">
+                <h2>Demo Mode</h2>
+                <div class="btn-col">
+                  <button id="demo-robot-online" class="primary">Simulate Robot Online</button>
+                  <button id="demo-robot-offline">Simulate Robot Offline</button>
+                  <button id="demo-low-battery">Simulate Low Battery</button>
+                  <button id="demo-fall">Simulate Fall Detected</button>
+                  <button id="demo-medicine-done">Simulate Medicine Done</button>
+                  <button id="demo-no-response">Simulate No Response</button>
+                  <button id="demo-toggle-light">Simulate Light ON/OFF Command</button>
+                </div>
+              </div>
+            </section>
+          </main>
     <script src="src/js/dashboard.js"></script>
     <script src="src/js/demo.js"></script>
   </body>

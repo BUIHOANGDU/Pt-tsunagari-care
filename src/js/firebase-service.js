@@ -94,6 +94,18 @@ const FirebaseService = (function () {
     localStorage.setItem("mock:care_logs", JSON.stringify(arr));
   }
 
+  async function listCareLogs() {
+    if (useFirestore) {
+      const snap = await db
+        .collection("care_logs")
+        .orderBy("createdAt", "desc")
+        .limit(50)
+        .get();
+      return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    }
+    return JSON.parse(localStorage.getItem("mock:care_logs") || "[]");
+  }
+
   async function createAlert(alert) {
     alert.createdAt = serverTimestamp();
     alert.status = alert.status || "open";
@@ -117,15 +129,56 @@ const FirebaseService = (function () {
     return JSON.parse(localStorage.getItem("mock:alerts") || "[]");
   }
 
+  // seed helper for local demo data
+  function seedMockData() {
+    if (useFirestore) return;
+    if (!localStorage.getItem("mock:devices")) {
+      const devs = [
+        {
+          id: "light01",
+          name: "Đèn phòng",
+          type: "light",
+          status: "off",
+          room: "living_room",
+          updatedAt: serverTimestamp(),
+        },
+        {
+          id: "fan01",
+          name: "Quạt phòng",
+          type: "fan",
+          status: "off",
+          room: "bedroom",
+          updatedAt: serverTimestamp(),
+        },
+      ];
+      localStorage.setItem("mock:devices", JSON.stringify(devs));
+    }
+    if (!localStorage.getItem("mock:robots:chami01")) {
+      localStorage.setItem(
+        "mock:robots:chami01",
+        JSON.stringify({
+          name: "Chami",
+          status: "offline",
+          battery: 88,
+          lastActive: serverTimestamp(),
+          emotion: "normal",
+          firmware: "xiaozhi-based",
+        }),
+      );
+    }
+  }
+
   return {
     init,
     getRobot,
     setRobot,
     listDevices,
+    listCareLogs,
     createCommand,
     createCareLog,
     createAlert,
     listAlerts,
+    seedMockData,
   };
 })();
 

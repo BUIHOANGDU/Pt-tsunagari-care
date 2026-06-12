@@ -20,23 +20,69 @@ body {
   color: #0f172a;
 }
 .topbar {
-  padding: 16px 24px;
+  padding: 12px 16px;
   background: linear-gradient(90deg, #0b6e4f, #106f5a);
   color: #fff;
 }
+.topbar-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+.logo {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.logo h1 {
+  margin: 0;
+  font-size: 20px;
+}
+.subtitle {
+  opacity: 0.95;
+  font-size: 12px;
+}
+.top-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
 .container {
-  padding: 20px;
+  padding: 18px;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+.overview .cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.overview-card {
+  padding: 14px;
+  text-align: center;
+}
+.card-title {
+  font-size: 13px;
+  color: var(--muted);
+}
+.card-value {
+  font-size: 18px;
+  font-weight: 600;
+  margin-top: 6px;
 }
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: repeat(2, 1fr);
   gap: 16px;
 }
 .card {
   background: var(--card);
   padding: 16px;
   border-radius: 8px;
-  box-shadow: 0 1px 4px rgba(2, 6, 23, 0.06);
+  box-shadow: 0 1px 6px rgba(2, 6, 23, 0.06);
 }
 .btn-row {
   display: flex;
@@ -65,8 +111,8 @@ button.primary {
   padding: 12px;
   text-align: center;
   color: var(--muted);
+  margin-top: 18px;
 }
-
 .status-normal {
   color: #065f46;
 }
@@ -76,9 +122,20 @@ button.primary {
 .status-emergency {
   color: var(--danger);
 }
-
-@media (max-width: 600px) {
-  .topbar h1 {
-    font-size: 18px;
+.device-item,
+.alert-item,
+.care-item {
+  padding: 8px;
+  border-bottom: 1px solid #f1f5f9;
+}
+.device-item .toggle {
+  margin-left: 8px;
+}
+@media (max-width: 900px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+  .topbar-inner {
+    padding: 0 8px;
   }
 }
