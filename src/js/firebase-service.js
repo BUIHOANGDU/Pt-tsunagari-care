@@ -214,10 +214,10 @@ const FirebaseService = (function () {
       return;
     }
     const arr = JSON.parse(localStorage.getItem("mock:commands") || "[]");
-    if (!cmd.id) cmd.id = 'cmd_'+Date.now()
+    if (!cmd.id) cmd.id = "cmd_" + Date.now();
     arr.unshift(cmd);
     localStorage.setItem("mock:commands", JSON.stringify(arr));
-    notifyLocal('commands')
+    notifyLocal("commands");
   }
 
   async function createCareLog(log) {
@@ -273,40 +273,119 @@ const FirebaseService = (function () {
   function seedMockData() {
     if (useFirestore) return;
     // devices
-    if (!localStorage.getItem('mock:devices')){
-      writeLocal('mock:devices', [
-        {id:'light01',name:'Đèn phòng',type:'light',status:'off',room:'living_room',updatedAt:serverTs()},
-        {id:'fan01',name:'Quạt phòng',type:'fan',status:'off',room:'bedroom',updatedAt:serverTs()},
-        {id:'ac01',name:'Điều hòa',type:'ac',status:'off',room:'living_room',updatedAt:serverTs()}
-      ])
+    if (!localStorage.getItem("mock:devices")) {
+      writeLocal("mock:devices", [
+        {
+          id: "light01",
+          name: "Đèn phòng",
+          type: "light",
+          status: "off",
+          room: "living_room",
+          updatedAt: serverTs(),
+        },
+        {
+          id: "fan01",
+          name: "Quạt phòng",
+          type: "fan",
+          status: "off",
+          room: "bedroom",
+          updatedAt: serverTs(),
+        },
+        {
+          id: "ac01",
+          name: "Điều hòa",
+          type: "ac",
+          status: "off",
+          room: "living_room",
+          updatedAt: serverTs(),
+        },
+      ]);
     }
 
     // alerts
-    if(!localStorage.getItem('mock:alerts') || JSON.parse(localStorage.getItem('mock:alerts')||'[]').length===0){
-      writeLocal('mock:alerts', [
-        {id:'alert1',type:'low_battery',level:'warning',message:'Pin robot còn 20% (demo)',status:'open',createdAt:serverTs(),source:'system'}
-      ])
+    if (
+      !localStorage.getItem("mock:alerts") ||
+      JSON.parse(localStorage.getItem("mock:alerts") || "[]").length === 0
+    ) {
+      writeLocal("mock:alerts", [
+        {
+          id: "alert1",
+          type: "low_battery",
+          level: "warning",
+          message: "Pin robot còn 20% (demo)",
+          status: "open",
+          createdAt: serverTs(),
+          source: "system",
+        },
+      ]);
     }
 
     // care logs
-    if(!localStorage.getItem('mock:care_logs') || JSON.parse(localStorage.getItem('mock:care_logs')||'[]').length===0){
-      writeLocal('mock:care_logs', [
-        {id:'cl1',userId:'user01',type:'medicine',status:'done',message:'Đã uống thuốc buổi sáng',createdAt:serverTs(),source:'demo'},
-        {id:'cl2',userId:'user01',type:'meal',status:'done',message:'Đã ăn sáng',createdAt:serverTs(),source:'demo'}
-      ])
+    if (
+      !localStorage.getItem("mock:care_logs") ||
+      JSON.parse(localStorage.getItem("mock:care_logs") || "[]").length === 0
+    ) {
+      writeLocal("mock:care_logs", [
+        {
+          id: "cl1",
+          userId: "user01",
+          type: "medicine",
+          status: "done",
+          message: "Đã uống thuốc buổi sáng",
+          createdAt: serverTs(),
+          source: "demo",
+        },
+        {
+          id: "cl2",
+          userId: "user01",
+          type: "meal",
+          status: "done",
+          message: "Đã ăn sáng",
+          createdAt: serverTs(),
+          source: "demo",
+        },
+      ]);
     }
 
     // commands
-    if(!localStorage.getItem('mock:commands') || JSON.parse(localStorage.getItem('mock:commands')||'[]').length===0){
-      writeLocal('mock:commands', [
-        {id:'cmd1',targetType:'device',targetId:'light01',command:'turn_on',status:'pending',createdAt:serverTs(),source:'demo'},
-        {id:'cmd2',targetType:'device',targetId:'fan01',command:'turn_off',status:'completed',createdAt:serverTs(),updatedAt:serverTs(),source:'demo'}
-      ])
+    if (
+      !localStorage.getItem("mock:commands") ||
+      JSON.parse(localStorage.getItem("mock:commands") || "[]").length === 0
+    ) {
+      writeLocal("mock:commands", [
+        {
+          id: "cmd1",
+          targetType: "device",
+          targetId: "light01",
+          command: "turn_on",
+          status: "pending",
+          createdAt: serverTs(),
+          source: "demo",
+        },
+        {
+          id: "cmd2",
+          targetType: "device",
+          targetId: "fan01",
+          command: "turn_off",
+          status: "completed",
+          createdAt: serverTs(),
+          updatedAt: serverTs(),
+          source: "demo",
+        },
+      ]);
     }
 
     // robot
-    if(!localStorage.getItem('mock:robots:chami01')){
-      writeLocal('mock:robots:chami01', {id:'chami01',name:'Chami',status:'online',battery:87,lastActive:serverTs(),emotion:'normal',firmware:'xiaozhi-based'})
+    if (!localStorage.getItem("mock:robots:chami01")) {
+      writeLocal("mock:robots:chami01", {
+        id: "chami01",
+        name: "Chami",
+        status: "online",
+        battery: 87,
+        lastActive: serverTs(),
+        emotion: "normal",
+        firmware: "xiaozhi-based",
+      });
     }
   }
 
