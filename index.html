@@ -37,157 +37,146 @@
     </header>
 
     <main class="container">
-      <div class="hero">
-        <div class="brand-hero">
-          <div style="display: flex; align-items: center; gap: 12px">
-            <div class="logo" aria-hidden>
-              <svg
-                width="28"
-                height="28"
-                viewBox="0 0 24 24"
-                fill="none"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <circle cx="12" cy="12" r="10" fill="#0b6e4f" />
-                <path
-                  d="M8 12c1.333-2 3.333-2 4 0 0 2-2 4-4 4s-2-2-2-4z"
-                  fill="#fff"
-                  opacity="0.95"
-                />
-              </svg>
-            </div>
+      <section class="hero-panel">
+        <div class="hero-text">
+          <span class="eyebrow">Smart Elder Care Platform</span>
+          <h1>TsunagariCare</h1>
+          <p>
+            Professional care monitoring with robot-assisted support, home
+            automation status, and wellness tracking for demo scenarios.
+          </p>
+          <p class="hero-subtitle" id="robot-summary">
+            Realtime monitoring for Chami and living space status.
+          </p>
+        </div>
+
+        <div class="hero-cards">
+          <article class="status-card">
+            <div class="status-icon status-icon-primary">🤖</div>
             <div>
-              <h2>TsunagariCare</h2>
-              <div class="subtitle">
-                つながりケア — Smart Home & Care Dashboard
-              </div>
+              <p class="status-label">Robot Status</p>
+              <p class="status-value" id="robot-status-text">—</p>
             </div>
-          </div>
-          <p>Monitoring robot, devices, and resident health in demo mode.</p>
+          </article>
+
+          <article class="status-card">
+            <div class="status-icon status-icon-blue">🔋</div>
+            <div>
+              <p class="status-label">Battery Level</p>
+              <p class="status-value" id="robot-battery-text">—%</p>
+            </div>
+          </article>
+
+          <article class="status-card">
+            <div class="status-icon status-icon-teal">⚕️</div>
+            <div>
+              <p class="status-label">User Health</p>
+              <p class="status-value" id="user-state-text">—</p>
+            </div>
+          </article>
+
+          <article class="status-card">
+            <div class="status-icon status-icon-warning">⚠️</div>
+            <div>
+              <p class="status-label">Alerts</p>
+              <p class="status-value" id="alerts-count">0</p>
+            </div>
+          </article>
         </div>
+      </section>
 
-        <div class="status-cards">
-          <div class="status-card">
-            <div class="meta">
-              <div class="icon">🤖</div>
+      <section class="main-grid">
+        <div class="column-left">
+          <section class="panel-card robot-panel">
+            <div class="robot-meta-top">
+              <div class="robot-avatar">Ch</div>
               <div>
-                <div class="label">Robot</div>
-                <div class="value" id="robot-status-text">—</div>
+                <p class="eyebrow">Robot Care Assistant</p>
+                <h2>Chami</h2>
               </div>
             </div>
-          </div>
-
-          <div class="status-card">
-            <div class="meta">
-              <div class="icon">🔋</div>
-              <div>
-                <div class="label">Battery</div>
-                <div class="value" id="robot-battery-text">—%</div>
+            <div class="robot-details">
+              <div class="detail-pill">
+                <span>Battery</span>
+                <strong class="detail-value">—%</strong>
+              </div>
+              <div class="detail-pill">
+                <span>Status</span>
+                <strong class="detail-value">—</strong>
+              </div>
+              <div class="detail-pill">
+                <span>Connected Devices</span>
+                <strong id="devices-count">0</strong>
               </div>
             </div>
-          </div>
+          </section>
 
-          <div class="status-card">
-            <div class="meta">
-              <div class="icon">⚕️</div>
-              <div>
-                <div class="label">User Health</div>
-                <div class="value" id="user-state-text">—</div>
-              </div>
+          <section class="panel-card devices-panel" id="devices-card">
+            <div class="panel-header">
+              <h2>Smart Home Devices</h2>
+              <span class="badge live">Live</span>
             </div>
-          </div>
+            <div id="devices-list" class="devices-grid"></div>
+          </section>
 
-          <div class="status-card">
-            <div class="meta">
-              <div class="icon">⚠️</div>
-              <div>
-                <div class="label">Alerts</div>
-                <div class="value" id="alerts-count">0</div>
-              </div>
+          <section class="panel-card timeline-panel" id="health-card">
+            <div class="panel-header">
+              <h2>Health Timeline</h2>
             </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="main-grid">
-        <div class="left-column">
-          <div class="robot-card">
-            <div class="robot-avatar">Ch</div>
-            <div class="robot-meta">
-              <h3>Chami</h3>
-              <p id="robot-summary">Status and last activity</p>
-              <div class="robot-stats">
-                <div class="robot-stat">
-                  <div class="num" id="robot-battery-text">—%</div>
-                  <div class="label">Battery</div>
-                </div>
-                <div class="robot-stat">
-                  <div class="num" id="robot-status-text">—</div>
-                  <div class="label">Connection</div>
-                </div>
-                <div class="robot-stat">
-                  <div class="num" id="devices-count">0</div>
-                  <div class="label">Devices</div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="card timeline" id="health-card">
-            <h3>Health Timeline</h3>
             <div id="care-logs"></div>
-            <div class="btn-row" style="margin-top: 10px">
+            <div class="btn-row timeline-actions">
               <button id="btn-medicine-done">Đã uống thuốc</button>
               <button id="btn-medicine-missed">Chưa uống thuốc</button>
               <button id="btn-ate">Đã ăn sáng</button>
               <button id="btn-no-response">Không phản hồi</button>
             </div>
-          </div>
-
-          <div class="card devices-grid" id="devices-card">
-            <h3>Smart Home Devices</h3>
-            <div id="devices-list"></div>
-          </div>
+          </section>
         </div>
 
-        <aside class="right-column">
-          <div class="alert-card">
-            <h3>Alert Center</h3>
+        <aside class="column-right">
+          <section class="panel-card alert-panel">
+            <div class="panel-header">
+              <h2>Alert Center</h2>
+              <span class="badge danger">Critical</span>
+            </div>
             <div id="alerts-list"></div>
-            <div style="margin-top: 8px" class="btn-row">
+            <div class="btn-row">
               <button id="btn-sim-fall">Tạo cảnh báo ngã</button>
               <button id="btn-sim-robot-offline">
                 Tạo cảnh báo robot offline
               </button>
             </div>
-          </div>
+          </section>
 
-          <div class="commands-list">
-            <h3>Commands</h3>
+          <section class="panel-card commands-panel">
+            <div class="panel-header">
+              <h2>Command Queue</h2>
+              <span class="badge teal">Realtime</span>
+            </div>
             <div id="commands-list"></div>
-            <div style="margin-top: 8px" class="btn-row">
+            <div class="btn-row">
               <button id="btn-refresh-commands">Refresh Commands</button>
             </div>
-          </div>
+          </section>
 
-          <div class="card" id="demo-card">
-            <h3>Demo Mode</h3>
-            <div class="btn-col" style="margin-top: 8px">
-              <button id="demo-robot-online" class="primary">
-                Simulate Robot Online
-              </button>
-              <button id="demo-robot-offline">Simulate Robot Offline</button>
-              <button id="demo-low-battery">Simulate Low Battery</button>
-              <button id="demo-fall">Simulate Fall Detected</button>
-              <button id="demo-medicine-done">Simulate Medicine Done</button>
-              <button id="demo-no-response">Simulate No Response</button>
-              <button id="demo-toggle-light">
-                Simulate Light ON/OFF Command
-              </button>
+          <section class="panel-card demo-panel" id="demo-card">
+            <div class="panel-header">
+              <h2>Demo Controls</h2>
             </div>
-          </div>
+            <div class="btn-col">
+              <button id="demo-robot-online" class="primary">
+                Robot Online
+              </button>
+              <button id="demo-robot-offline">Robot Offline</button>
+              <button id="demo-low-battery">Low Battery</button>
+              <button id="demo-fall">Fall Detected</button>
+              <button id="demo-medicine-done">Medicine Done</button>
+              <button id="demo-no-response">No Response</button>
+              <button id="demo-toggle-light">Toggle Light Command</button>
+            </div>
+          </section>
         </aside>
-      </div>
+      </section>
     </main>
     <script src="src/js/firebase-config.example.js"></script>
     <script src="src/js/firebase-service.js"></script>
