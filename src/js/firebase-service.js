@@ -9,12 +9,19 @@
 const FirebaseService = (function () {
   let useFirestore = false;
   let db = null;
-  const listeners = { robots: [], devices: [], alerts: [], care_logs: [] };
+  const listeners = {
+    robots: [],
+    devices: [],
+    alerts: [],
+    care_logs: [],
+    commands: [],
+  };
   const unsubscribes = {
     robots: null,
     devices: null,
     alerts: null,
     care_logs: null,
+    commands: null,
   };
 
   function init() {
@@ -73,6 +80,9 @@ const FirebaseService = (function () {
     } else if (kind === "care_logs") {
       const c = JSON.parse(localStorage.getItem("mock:care_logs") || "[]");
       listeners.care_logs.forEach((cb) => cb(c));
+    } else if (kind === "commands") {
+      const cm = JSON.parse(localStorage.getItem("mock:commands") || "[]");
+      listeners.commands.forEach((cb) => cb(cm));
     }
   }
 
@@ -130,6 +140,9 @@ const FirebaseService = (function () {
   function subscribeToCareLogs(cb) {
     return subscribeTo("care_logs", cb);
   }
+  function subscribeToCommands(cb) {
+    return subscribeTo("commands", cb);
+  }
 
   // ---------- CRUD helpers ----------
   async function getRobot(id = "chami01") {
@@ -163,6 +176,35 @@ const FirebaseService = (function () {
     return JSON.parse(localStorage.getItem("mock:devices") || "[]");
   }
 
+  async function listCommands() {
+    if (useFirestore) {
+      const snap = await db
+        .collection("commands")
+        .orderBy("createdAt", "desc")
+        .get();
+      return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    }
+    return JSON.parse(localStorage.getItem("mock:commands") || "[]");
+  }
+
+  async function updateCommandStatus(id, status) {
+    if (useFirestore) {
+      await db
+        .collection("commands")
+        .doc(id)
+        .update({ status: status, updatedAt: serverTs() });
+      return;
+    }
+    const arr = JSON.parse(localStorage.getItem("mock:commands") || "[]");
+    const idx = arr.findIndex((c) => c.id === id);
+    if (idx > -1) {
+      arr[idx].status = status;
+      arr[idx].updatedAt = serverTs();
+      localStorage.setItem("mock:commands", JSON.stringify(arr));
+      notifyLocal("commands");
+    }
+  }
+
   async function createCommand(cmd) {
     cmd.createdAt = cmd.createdAt || serverTs();
     cmd.status = cmd.status || "pending";
@@ -172,8 +214,10 @@ const FirebaseService = (function () {
       return;
     }
     const arr = JSON.parse(localStorage.getItem("mock:commands") || "[]");
-    arr.push(cmd);
+    if (!cmd.id) cmd.id = 'cmd_'+Date.now()
+    arr.unshift(cmd);
     localStorage.setItem("mock:commands", JSON.stringify(arr));
+    notifyLocal('commands')
   }
 
   async function createCareLog(log) {
@@ -228,40 +272,42 @@ const FirebaseService = (function () {
   // seed local demo dataset
   function seedMockData() {
     if (useFirestore) return;
-    if (!localStorage.getItem("mock:devices")) {
-      writeLocal("mock:devices", [
-        {
-          id: "light01",
-          name: "Đèn phòng",
-          type: "light",
-          status: "off",
-          room: "living_room",
-          updatedAt: serverTs(),
-        },
-        {
-          id: "fan01",
-          name: "Quạt phòng",
-          type: "fan",
-          status: "off",
-          room: "bedroom",
-          updatedAt: serverTs(),
-        },
-      ]);
+    // devices
+    if (!localStorage.getItem('mock:devices')){
+      writeLocal('mock:devices', [
+        {id:'light01',name:'Đèn phòng',type:'light',status:'off',room:'living_room',updatedAt:serverTs()},
+        {id:'fan01',name:'Quạt phòng',type:'fan',status:'off',room:'bedroom',updatedAt:serverTs()},
+        {id:'ac01',name:'Điều hòa',type:'ac',status:'off',room:'living_room',updatedAt:serverTs()}
+      ])
     }
-    if (!localStorage.getItem("mock:alerts")) writeLocal("mock:alerts", []);
-    if (!localStorage.getItem("mock:care_logs"))
-      writeLocal("mock:care_logs", []);
-    if (!localStorage.getItem("mock:commands")) writeLocal("mock:commands", []);
-    if (!localStorage.getItem("mock:robots:chami01"))
-      writeLocal("mock:robots:chami01", {
-        id: "chami01",
-        name: "Chami",
-        status: "offline",
-        battery: 88,
-        lastActive: serverTs(),
-        emotion: "normal",
-        firmware: "xiaozhi-based",
-      });
+
+    // alerts
+    if(!localStorage.getItem('mock:alerts') || JSON.parse(localStorage.getItem('mock:alerts')||'[]').length===0){
+      writeLocal('mock:alerts', [
+        {id:'alert1',type:'low_battery',level:'warning',message:'Pin robot còn 20% (demo)',status:'open',createdAt:serverTs(),source:'system'}
+      ])
+    }
+
+    // care logs
+    if(!localStorage.getItem('mock:care_logs') || JSON.parse(localStorage.getItem('mock:care_logs')||'[]').length===0){
+      writeLocal('mock:care_logs', [
+        {id:'cl1',userId:'user01',type:'medicine',status:'done',message:'Đã uống thuốc buổi sáng',createdAt:serverTs(),source:'demo'},
+        {id:'cl2',userId:'user01',type:'meal',status:'done',message:'Đã ăn sáng',createdAt:serverTs(),source:'demo'}
+      ])
+    }
+
+    // commands
+    if(!localStorage.getItem('mock:commands') || JSON.parse(localStorage.getItem('mock:commands')||'[]').length===0){
+      writeLocal('mock:commands', [
+        {id:'cmd1',targetType:'device',targetId:'light01',command:'turn_on',status:'pending',createdAt:serverTs(),source:'demo'},
+        {id:'cmd2',targetType:'device',targetId:'fan01',command:'turn_off',status:'completed',createdAt:serverTs(),updatedAt:serverTs(),source:'demo'}
+      ])
+    }
+
+    // robot
+    if(!localStorage.getItem('mock:robots:chami01')){
+      writeLocal('mock:robots:chami01', {id:'chami01',name:'Chami',status:'online',battery:87,lastActive:serverTs(),emotion:'normal',firmware:'xiaozhi-based'})
+    }
   }
 
   // init auto
@@ -279,10 +325,12 @@ const FirebaseService = (function () {
     subscribeToDevices,
     subscribeToAlerts,
     subscribeToCareLogs,
+    subscribeToCommands,
     // CRUD
     getRobot,
     setRobot,
     listDevices,
+    listCommands,
     createCommand,
     createCareLog,
     createAlert,

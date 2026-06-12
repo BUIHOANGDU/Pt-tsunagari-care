@@ -91,6 +91,31 @@ function renderCareLogs(logs) {
   });
 }
 
+// Commands UI
+function renderCommands(cmds){
+  const el = document.getElementById('commands-list')
+  el.innerHTML = ''
+  if(!cmds || cmds.length===0){ el.innerHTML = '<div class="care-item">No commands</div>'; return }
+  cmds.forEach(c=>{
+    const row = document.createElement('div')
+    row.className = 'care-item'
+    row.innerHTML = `<strong>${c.command}</strong> → ${c.targetId} — <em>${c.status}</em> <button data-id="${c.id}" class="cmd-complete">Mark Done</button>`
+    el.appendChild(row)
+  })
+  document.querySelectorAll('.cmd-complete').forEach(btn=>{
+    btn.onclick = async ()=>{
+      const id = btn.dataset.id
+      await FirebaseService.updateCommandStatus(id,'completed')
+      alert('Command marked completed (demo)')
+    }
+  })
+}
+
+document.getElementById('btn-refresh-commands')?.addEventListener('click', async ()=>{
+  const cmds = await FirebaseService.listCommands()
+  renderCommands(cmds)
+})
+
 // bind buttons (demo actions)
 document.getElementById("btn-medicine-done").onclick = async () => {
   await FirebaseService.createCareLog({
@@ -221,6 +246,10 @@ if (typeof FirebaseService.subscribeToCareLogs === "function") {
   FirebaseService.subscribeToCareLogs((data) =>
     updateCareLogsSection(data || []),
   );
+}
+
+if(typeof FirebaseService.subscribeToCommands === 'function'){
+  FirebaseService.subscribeToCommands(data=> renderCommands(data||[]))
 }
 
 // initial fetch to populate UI immediately
