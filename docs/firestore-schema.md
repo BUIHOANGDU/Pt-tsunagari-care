@@ -9,6 +9,7 @@ Collections (MVP):
   - Example fields: `name`, `type`, `status`, `room`, `updatedAt`.
 - `commands` — lệnh từ dashboard gửi tới thiết bị (consumer đọc và thực hiện).
   - Fields: `targetType`, `targetId`, `command`, `status`, `createdAt`, `source`.
+  - Notes: Dashboard creates commands with `status: pending`. Smart Home module (ESP32) should watch this collection and set `status` to `sent`/`done`/`failed` when processed.
 - `care_logs` — nhật ký chăm sóc (medicine, meal, response).
   - Fields: `userId`, `type`, `status`, `message`, `createdAt`, `source`.
 - `alerts` — cảnh báo hệ thống (fall, robot_offline,...).

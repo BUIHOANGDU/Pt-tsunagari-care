@@ -26,6 +26,11 @@ python -m http.server 8000
 ```
 
 Nếu không cấu hình Firebase, giao diện dùng chế độ fallback demo (localStorage).
+Important: Mock-first approach
+
+- The Web Dashboard is mock-first: it runs fully with localStorage demo data and does not require a real Robot or ESP32.
+- `Robot AI Module` and `Smart Home Module` are being developed separately; this dashboard provides Firestore schema and a command system so those modules can connect later.
+- Commands created by the dashboard are stored in the `commands` collection (or `mock:commands` in localStorage) with `status: pending`.
 
 Firebase integration (quick guide):
 
