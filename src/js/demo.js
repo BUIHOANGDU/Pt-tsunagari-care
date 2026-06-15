@@ -45,8 +45,10 @@ document.getElementById("demo-fall").onclick = async () => {
   await FirebaseService.createAlert({
     type: "fall_detected",
     level: "emergency",
-    message: "Phát hiện ngã (demo)",
-    source: "demo",
+    message: "Phát hiện ngã tại phòng khách (demo)",
+    source: "camera_ai",
+    lineStatus: "sent",
+    createdAt: new Date().toISOString(),
   });
   alert("Created fall alert");
 };

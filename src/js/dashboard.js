@@ -65,24 +65,80 @@ function renderDevices(devices) {
     wrap.appendChild(item);
   });
 }
+function getAlertTypeLabel(type) {
+  const labels = {
+    fall_detected: "Phát hiện ngã",
+    robot_offline: "Robot mất kết nối",
+    low_battery: "Pin yếu",
+    no_response: "Không phản hồi",
+    medicine_missed: "Chưa uống thuốc",
+  };
 
+  return labels[type] || type || "Cảnh báo";
+}
+
+function getAlertSourceLabel(source) {
+  const labels = {
+    camera_ai: "Camera AI",
+    robot_chami: "Robot Chami",
+    health_module: "Health Module",
+    smart_home: "Smart Home",
+    web_dashboard: "Web Dashboard",
+    demo: "Demo Mode",
+  };
+
+  return labels[source] || "Không rõ nguồn";
+}
+
+function getLineStatusLabel(status) {
+  const labels = {
+    pending: "LINE: Đang gửi",
+    sent: "LINE: Đã gửi",
+    failed: "LINE: Lỗi",
+  };
+
+  return labels[status] || "LINE: Demo";
+}
+
+function formatDateTime(value) {
+  if (!value) return "Không rõ thời gian";
+
+  // Firestore Timestamp support
+  if (typeof value.toDate === "function") {
+    return value.toDate().toLocaleString("vi-VN");
+  }
+
+  return new Date(value).toLocaleString("vi-VN");
+}
 function renderAlerts(alerts) {
   const el = document.getElementById("alerts-list");
   el.innerHTML = "";
+
   if (!alerts || alerts.length === 0) {
     el.innerHTML =
       '<div style="padding: 12px; color: #6b7280; text-align: center; font-size: 0.9rem;">No alerts</div>';
     return;
   }
+
   alerts.slice(0, 8).forEach((a) => {
     const row = document.createElement("div");
-    row.className = "alert-item";
+    row.className = `alert-item alert-${a.level || "warning"}`;
+
     row.innerHTML = `
       <div class="left">
-        <strong>${a.type}</strong>
+        <strong>${getAlertTypeLabel(a.type)}</strong>
         <small>${a.message || ""}</small>
+
+        <div class="alert-meta">
+          <span>${formatDateTime(a.createdAt)}</span>
+          <span>•</span>
+          <span>${getAlertSourceLabel(a.source)}</span>
+          <span>•</span>
+          <span>${getLineStatusLabel(a.lineStatus)}</span>
+        </div>
       </div>
     `;
+
     el.appendChild(row);
   });
 }
@@ -188,15 +244,19 @@ document.getElementById("btn-sim-fall").onclick = async () => {
     type: "fall_detected",
     level: "emergency",
     message: "Phát hiện ngã tại phòng khách",
-    source: "demo",
+    source: "camera_ai",
+    lineStatus: "sent",
+    createdAt: new Date().toISOString(),
   });
 };
 document.getElementById("btn-sim-robot-offline").onclick = async () => {
   await FirebaseService.createAlert({
     type: "robot_offline",
     level: "warning",
-    message: "Robot mất kết nối",
-    source: "demo",
+    message: "Robot Chami mất kết nối",
+    source: "robot_chami",
+    lineStatus: "sent",
+    createdAt: new Date().toISOString(),
   });
 };
 

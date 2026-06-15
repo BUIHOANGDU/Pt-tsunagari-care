@@ -723,3 +723,30 @@ button.primary:hover {
     grid-template-columns: 1fr;
   }
 }
+.alert-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.alert-item strong {
+  color: #111827;
+}
+
+.alert-item.alert-emergency {
+  background: #fef2f2;
+  border-left-color: var(--danger);
+}
+
+.alert-item.alert-warning {
+  background: #fffbeb;
+  border-left-color: var(--warning);
+}
+
+.alert-item.alert-normal {
+  background: #ecfdf5;
+  border-left-color: var(--success);
+}
