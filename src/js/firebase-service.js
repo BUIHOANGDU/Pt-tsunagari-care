@@ -1,14 +1,13 @@
 /*
-  FirebaseService
-  - If `src/js/firebase-config.js` exists and Firebase SDK loaded, uses Firestore realtime
-    listeners (onSnapshot) for robots, devices, alerts, care_logs.
-  - Otherwise falls back to localStorage-based mock data and notifies local listeners.
-  - Exposes subscribe/unsubscribe helpers and CRUD helpers used by dashboard/demo.
+  FirebaseService for TsunagariCare
+  - Uses Firebase Realtime Database when firebase-config.js + SDK are loaded.
+  - Falls back to localStorage when Firebase is not configured.
 */
 
 const FirebaseService = (function () {
-  let useFirestore = false;
+  let useRealtime = false;
   let db = null;
+
   const listeners = {
     robots: [],
     devices: [],
@@ -16,6 +15,7 @@ const FirebaseService = (function () {
     care_logs: [],
     commands: [],
   };
+
   const unsubscribes = {
     robots: null,
     devices: null,
@@ -27,19 +27,28 @@ const FirebaseService = (function () {
   function init() {
     try {
       if (window.firebaseConfig && window.firebase) {
-        if (!firebase.apps || !firebase.apps.length)
+        if (!firebase.apps || !firebase.apps.length) {
           firebase.initializeApp(window.firebaseConfig);
-        db = firebase.firestore();
-        useFirestore = true;
-        console.log("FirebaseService: using Firestore realtime");
+        }
+
+        if (typeof firebase.database === "function") {
+          db = firebase.database();
+          useRealtime = true;
+          console.log("FirebaseService: using Realtime Database");
+          seedRealtimeData();
+        } else {
+          console.warn("Firebase Realtime Database SDK not loaded.");
+          useRealtime = false;
+        }
       } else {
-        console.log("FirebaseService: using local demo (no firebase config)");
-        useFirestore = false;
+        console.log("FirebaseService: using local demo mode");
+        useRealtime = false;
       }
     } catch (e) {
       console.warn("FirebaseService init failed, fallback to local", e);
-      useFirestore = false;
+      useRealtime = false;
     }
+
     seedMockData();
   }
 
@@ -47,78 +56,135 @@ const FirebaseService = (function () {
     return new Date().toISOString();
   }
 
+  function sortByCreatedAtDesc(arr) {
+    return arr.sort((a, b) => {
+      const ta = new Date(a.createdAt || a.updatedAt || 0).getTime();
+      const tb = new Date(b.createdAt || b.updatedAt || 0).getTime();
+      return tb - ta;
+    });
+  }
+
+  function objectToArray(value) {
+    if (!value) return [];
+    if (Array.isArray(value)) return value;
+
+    return Object.entries(value).map(([id, data]) => {
+      if (data && typeof data === "object") {
+        return { id, ...data };
+      }
+      return { id, value: data };
+    });
+  }
+
   // ---------- Local helpers ----------
   function readLocal(key) {
     return JSON.parse(localStorage.getItem(key) || "null");
   }
-  function writeLocal(key, v) {
-    localStorage.setItem(key, JSON.stringify(v));
+
+  function writeLocal(key, value) {
+    localStorage.setItem(key, JSON.stringify(value));
   }
 
   function listLocalRobots() {
     const out = [];
-    for (const k in localStorage) {
-      if (k.startsWith("mock:robots:")) {
+
+    for (const key in localStorage) {
+      if (key.startsWith("mock:robots:")) {
         try {
-          out.push(JSON.parse(localStorage.getItem(k)));
-        } catch (e) {}
+          out.push(JSON.parse(localStorage.getItem(key)));
+        } catch (e) {
+          console.warn("Invalid local robot data", e);
+        }
       }
     }
+
     return out;
   }
 
   function notifyLocal(kind) {
     if (kind === "robots") {
-      const data = listLocalRobots();
-      listeners.robots.forEach((cb) => cb(data));
-    } else if (kind === "devices") {
-      const d = JSON.parse(localStorage.getItem("mock:devices") || "[]");
-      listeners.devices.forEach((cb) => cb(d));
-    } else if (kind === "alerts") {
-      const a = JSON.parse(localStorage.getItem("mock:alerts") || "[]");
-      listeners.alerts.forEach((cb) => cb(a));
-    } else if (kind === "care_logs") {
-      const c = JSON.parse(localStorage.getItem("mock:care_logs") || "[]");
-      listeners.care_logs.forEach((cb) => cb(c));
-    } else if (kind === "commands") {
-      const cm = JSON.parse(localStorage.getItem("mock:commands") || "[]");
-      listeners.commands.forEach((cb) => cb(cm));
+      listeners.robots.forEach((cb) => cb(listLocalRobots()));
+      return;
     }
+
+    const map = {
+      devices: "mock:devices",
+      alerts: "mock:alerts",
+      care_logs: "mock:care_logs",
+      commands: "mock:commands",
+    };
+
+    const key = map[kind];
+    if (!key) return;
+
+    const data = JSON.parse(localStorage.getItem(key) || "[]");
+    listeners[kind].forEach((cb) => cb(data));
   }
 
-  // ---------- Public API: subscribe/unsubscribe ----------
-  function subscribeTo(collection, cb) {
-    if (!listeners[collection])
-      throw new Error("Unknown collection " + collection);
-    listeners[collection].push(cb);
+  // ---------- Realtime Database helpers ----------
+  async function getRealtimeValue(path) {
+    const snap = await db.ref(path).get();
+    return snap.exists() ? snap.val() : null;
+  }
 
-    // attach firestore listener if available and not yet attached
-    if (useFirestore && !unsubscribes[collection]) {
-      const col = collection === "care_logs" ? "care_logs" : collection;
-      unsubscribes[collection] = db
-        .collection(col)
-        .orderBy("createdAt", "desc")
-        .onSnapshot(
-          (snap) => {
-            const arr = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-            listeners[collection].forEach((fn) => fn(arr));
-          },
-          (err) => {
-            console.warn("Firestore onSnapshot error", err);
-          },
-        );
+  async function setRealtimeValue(path, value) {
+    await db.ref(path).set(value);
+  }
+
+  async function updateRealtimeValue(path, value) {
+    await db.ref(path).update(value);
+  }
+
+  async function pushRealtimeValue(path, value) {
+    const ref = db.ref(path).push();
+    const data = { id: ref.key, ...value };
+    await ref.set(data);
+    return data;
+  }
+
+  // ---------- Subscribe ----------
+  function subscribeTo(collection, cb) {
+    if (!listeners[collection]) {
+      throw new Error("Unknown collection " + collection);
     }
 
-    // if local fallback, immediately notify with current data
-    if (!useFirestore) notifyLocal(collection);
+    listeners[collection].push(cb);
 
-    // return unsubscribe function for this callback
+    if (useRealtime && !unsubscribes[collection]) {
+      const ref = db.ref(collection);
+
+      const handler = (snapshot) => {
+        const value = snapshot.val();
+        let data = objectToArray(value);
+
+        if (
+          collection === "alerts" ||
+          collection === "care_logs" ||
+          collection === "commands"
+        ) {
+          data = sortByCreatedAtDesc(data);
+        }
+
+        listeners[collection].forEach((fn) => fn(data));
+      };
+
+      ref.on("value", handler, (err) => {
+        console.warn("Realtime Database listener error", err);
+      });
+
+      unsubscribes[collection] = () => ref.off("value", handler);
+    }
+
+    if (!useRealtime) {
+      notifyLocal(collection);
+    }
+
     return () => {
       const idx = listeners[collection].indexOf(cb);
       if (idx > -1) listeners[collection].splice(idx, 1);
-      // if no callbacks left, detach firestore listener
+
       if (
-        useFirestore &&
+        useRealtime &&
         listeners[collection].length === 0 &&
         unsubscribes[collection]
       ) {
@@ -131,148 +197,309 @@ const FirebaseService = (function () {
   function subscribeToRobots(cb) {
     return subscribeTo("robots", cb);
   }
+
   function subscribeToDevices(cb) {
     return subscribeTo("devices", cb);
   }
+
   function subscribeToAlerts(cb) {
     return subscribeTo("alerts", cb);
   }
+
   function subscribeToCareLogs(cb) {
     return subscribeTo("care_logs", cb);
   }
+
   function subscribeToCommands(cb) {
     return subscribeTo("commands", cb);
   }
 
-  // ---------- CRUD helpers ----------
+  // ---------- CRUD ----------
   async function getRobot(id = "chami01") {
-    if (useFirestore) {
-      const doc = await db.collection("robots").doc(id).get();
-      return doc.exists ? { id: doc.id, ...doc.data() } : null;
+    if (useRealtime) {
+      const data = await getRealtimeValue(`robots/${id}`);
+      return data ? { id, ...data } : null;
     }
+
     return JSON.parse(localStorage.getItem("mock:robots:" + id) || "null");
   }
 
   async function setRobot(id, data) {
-    data.updatedAt = serverTs();
-    if (useFirestore) {
-      await db.collection("robots").doc(id).set(data, { merge: true });
+    const payload = {
+      id,
+      ...data,
+      updatedAt: serverTs(),
+    };
+
+    if (useRealtime) {
+      await updateRealtimeValue(`robots/${id}`, payload);
       return;
     }
+
     localStorage.setItem(
       "mock:robots:" + id,
-      JSON.stringify(
-        Object.assign({}, readLocal("mock:robots:" + id) || {}, data),
-      ),
+      JSON.stringify({
+        ...(readLocal("mock:robots:" + id) || {}),
+        ...payload,
+      }),
     );
+
     notifyLocal("robots");
   }
 
   async function listDevices() {
-    if (useFirestore) {
-      const snap = await db.collection("devices").get();
-      return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    if (useRealtime) {
+      return objectToArray(await getRealtimeValue("devices"));
     }
+
     return JSON.parse(localStorage.getItem("mock:devices") || "[]");
   }
 
   async function listCommands() {
-    if (useFirestore) {
-      const snap = await db
-        .collection("commands")
-        .orderBy("createdAt", "desc")
-        .get();
-      return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    if (useRealtime) {
+      return sortByCreatedAtDesc(
+        objectToArray(await getRealtimeValue("commands")),
+      );
     }
+
     return JSON.parse(localStorage.getItem("mock:commands") || "[]");
   }
 
   async function updateCommandStatus(id, status) {
-    if (useFirestore) {
-      await db
-        .collection("commands")
-        .doc(id)
-        .update({ status: status, updatedAt: serverTs() });
+    const payload = {
+      status,
+      updatedAt: serverTs(),
+    };
+
+    if (useRealtime) {
+      await updateRealtimeValue(`commands/${id}`, payload);
       return;
     }
+
     const arr = JSON.parse(localStorage.getItem("mock:commands") || "[]");
     const idx = arr.findIndex((c) => c.id === id);
+
     if (idx > -1) {
-      arr[idx].status = status;
-      arr[idx].updatedAt = serverTs();
+      arr[idx] = { ...arr[idx], ...payload };
       localStorage.setItem("mock:commands", JSON.stringify(arr));
       notifyLocal("commands");
     }
   }
 
   async function createCommand(cmd) {
-    cmd.createdAt = cmd.createdAt || serverTs();
-    cmd.status = cmd.status || "pending";
-    cmd.source = cmd.source || "web_dashboard";
-    if (useFirestore) {
-      await db.collection("commands").add(cmd);
+    const payload = {
+      targetType: cmd.targetType || "device",
+      targetId: cmd.targetId || "",
+      command: cmd.command || "unknown",
+      status: cmd.status || "pending",
+      source: cmd.source || "web_dashboard",
+      createdAt: cmd.createdAt || serverTs(),
+    };
+
+    if (useRealtime) {
+      await pushRealtimeValue("commands", payload);
       return;
     }
+
     const arr = JSON.parse(localStorage.getItem("mock:commands") || "[]");
-    if (!cmd.id) cmd.id = "cmd_" + Date.now();
-    arr.unshift(cmd);
+    arr.unshift({
+      id: cmd.id || "cmd_" + Date.now(),
+      ...payload,
+    });
+
     localStorage.setItem("mock:commands", JSON.stringify(arr));
     notifyLocal("commands");
   }
 
   async function createCareLog(log) {
-    log.createdAt = log.createdAt || serverTs();
-    log.source = log.source || "web_dashboard";
-    if (useFirestore) {
-      await db.collection("care_logs").add(log);
+    const payload = {
+      userId: log.userId || "user01",
+      type: log.type || "unknown",
+      status: log.status || "done",
+      message: log.message || "",
+      source: log.source || "web_dashboard",
+      createdAt: log.createdAt || serverTs(),
+    };
+
+    if (useRealtime) {
+      await pushRealtimeValue("care_logs", payload);
       return;
     }
+
     const arr = JSON.parse(localStorage.getItem("mock:care_logs") || "[]");
-    arr.unshift(log);
+    arr.unshift({
+      id: log.id || "cl_" + Date.now(),
+      ...payload,
+    });
+
     localStorage.setItem("mock:care_logs", JSON.stringify(arr));
     notifyLocal("care_logs");
   }
 
   async function createAlert(alert) {
-    alert.createdAt = alert.createdAt || serverTs();
-    alert.status = alert.status || "open";
-    alert.source = alert.source || "web_module";
-    if (useFirestore) {
-      await db.collection("alerts").add(alert);
+    const payload = {
+      type: alert.type || "unknown_alert",
+      level: alert.level || "warning",
+      message: alert.message || "",
+      status: alert.status || "open",
+      source: alert.source || "web_dashboard",
+      lineStatus: alert.lineStatus || "sent",
+      createdAt: alert.createdAt || serverTs(),
+    };
+
+    if (useRealtime) {
+      await pushRealtimeValue("alerts", payload);
       return;
     }
+
     const arr = JSON.parse(localStorage.getItem("mock:alerts") || "[]");
-    arr.unshift(alert);
+    arr.unshift({
+      id: alert.id || "alert_" + Date.now(),
+      ...payload,
+    });
+
     localStorage.setItem("mock:alerts", JSON.stringify(arr));
     notifyLocal("alerts");
   }
 
   async function listAlerts() {
-    if (useFirestore) {
-      const snap = await db
-        .collection("alerts")
-        .orderBy("createdAt", "desc")
-        .get();
-      return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    if (useRealtime) {
+      return sortByCreatedAtDesc(
+        objectToArray(await getRealtimeValue("alerts")),
+      );
     }
+
     return JSON.parse(localStorage.getItem("mock:alerts") || "[]");
   }
+
   async function listCareLogs() {
-    if (useFirestore) {
-      const snap = await db
-        .collection("care_logs")
-        .orderBy("createdAt", "desc")
-        .limit(50)
-        .get();
-      return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    if (useRealtime) {
+      return sortByCreatedAtDesc(
+        objectToArray(await getRealtimeValue("care_logs")),
+      );
     }
+
     return JSON.parse(localStorage.getItem("mock:care_logs") || "[]");
   }
 
-  // seed local demo dataset
+  // ---------- Seed data ----------
+  async function seedRealtimeData() {
+    try {
+      const robot = await getRealtimeValue("robots/chami01");
+      if (!robot) {
+        await setRealtimeValue("robots/chami01", {
+          id: "chami01",
+          name: "Chami",
+          status: "online",
+          battery: 87,
+          lastActive: serverTs(),
+          emotion: "normal",
+          firmware: "xiaozhi-based",
+        });
+      }
+
+      const devices = await getRealtimeValue("devices");
+      if (!devices) {
+        await setRealtimeValue("devices", {
+          light01: {
+            id: "light01",
+            name: "Đèn phòng",
+            type: "light",
+            status: "off",
+            room: "living_room",
+            updatedAt: serverTs(),
+          },
+          fan01: {
+            id: "fan01",
+            name: "Quạt phòng",
+            type: "fan",
+            status: "off",
+            room: "bedroom",
+            updatedAt: serverTs(),
+          },
+          ac01: {
+            id: "ac01",
+            name: "Điều hòa",
+            type: "ac",
+            status: "off",
+            room: "living_room",
+            updatedAt: serverTs(),
+          },
+        });
+      }
+
+      const alerts = await getRealtimeValue("alerts");
+      if (!alerts) {
+        await setRealtimeValue("alerts/alert1", {
+          id: "alert1",
+          type: "low_battery",
+          level: "warning",
+          message: "Pin robot còn 20% (demo)",
+          status: "open",
+          source: "robot_chami",
+          lineStatus: "sent",
+          createdAt: serverTs(),
+        });
+      }
+
+      const careLogs = await getRealtimeValue("care_logs");
+      if (!careLogs) {
+        await setRealtimeValue("care_logs", {
+          cl1: {
+            id: "cl1",
+            userId: "user01",
+            type: "medicine",
+            status: "done",
+            message: "Đã uống thuốc buổi sáng",
+            source: "demo",
+            createdAt: serverTs(),
+          },
+          cl2: {
+            id: "cl2",
+            userId: "user01",
+            type: "meal",
+            status: "done",
+            message: "Đã ăn sáng",
+            source: "demo",
+            createdAt: serverTs(),
+          },
+        });
+      }
+
+      const commands = await getRealtimeValue("commands");
+      if (!commands) {
+        await setRealtimeValue("commands", {
+          cmd1: {
+            id: "cmd1",
+            targetType: "device",
+            targetId: "light01",
+            command: "turn_on",
+            status: "pending",
+            source: "demo",
+            createdAt: serverTs(),
+          },
+          cmd2: {
+            id: "cmd2",
+            targetType: "device",
+            targetId: "fan01",
+            command: "turn_off",
+            status: "completed",
+            source: "demo",
+            createdAt: serverTs(),
+            updatedAt: serverTs(),
+          },
+        });
+      }
+
+      console.log("FirebaseService: Realtime Database seed checked");
+    } catch (e) {
+      console.warn("Realtime seed failed", e);
+    }
+  }
+
   function seedMockData() {
-    if (useFirestore) return;
-    // devices
+    if (useRealtime) return;
+
     if (!localStorage.getItem("mock:devices")) {
       writeLocal("mock:devices", [
         {
@@ -302,11 +529,7 @@ const FirebaseService = (function () {
       ]);
     }
 
-    // alerts
-    if (
-      !localStorage.getItem("mock:alerts") ||
-      JSON.parse(localStorage.getItem("mock:alerts") || "[]").length === 0
-    ) {
+    if (!localStorage.getItem("mock:alerts")) {
       writeLocal("mock:alerts", [
         {
           id: "alert1",
@@ -315,16 +538,13 @@ const FirebaseService = (function () {
           message: "Pin robot còn 20% (demo)",
           status: "open",
           createdAt: serverTs(),
-          source: "system",
+          source: "robot_chami",
+          lineStatus: "sent",
         },
       ]);
     }
 
-    // care logs
-    if (
-      !localStorage.getItem("mock:care_logs") ||
-      JSON.parse(localStorage.getItem("mock:care_logs") || "[]").length === 0
-    ) {
+    if (!localStorage.getItem("mock:care_logs")) {
       writeLocal("mock:care_logs", [
         {
           id: "cl1",
@@ -347,11 +567,7 @@ const FirebaseService = (function () {
       ]);
     }
 
-    // commands
-    if (
-      !localStorage.getItem("mock:commands") ||
-      JSON.parse(localStorage.getItem("mock:commands") || "[]").length === 0
-    ) {
+    if (!localStorage.getItem("mock:commands")) {
       writeLocal("mock:commands", [
         {
           id: "cmd1",
@@ -375,7 +591,6 @@ const FirebaseService = (function () {
       ]);
     }
 
-    // robot
     if (!localStorage.getItem("mock:robots:chami01")) {
       writeLocal("mock:robots:chami01", {
         id: "chami01",
@@ -389,7 +604,6 @@ const FirebaseService = (function () {
     }
   }
 
-  // init auto
   try {
     if (window) init();
   } catch (e) {
@@ -398,18 +612,17 @@ const FirebaseService = (function () {
 
   return {
     init,
-    useFirestore: () => useFirestore,
-    // subscribe
+    useRealtime: () => useRealtime,
     subscribeToRobots,
     subscribeToDevices,
     subscribeToAlerts,
     subscribeToCareLogs,
     subscribeToCommands,
-    // CRUD
     getRobot,
     setRobot,
     listDevices,
     listCommands,
+    updateCommandStatus,
     createCommand,
     createCareLog,
     createAlert,
@@ -417,18 +630,4 @@ const FirebaseService = (function () {
     listCareLogs,
     seedMockData,
   };
-
-  // helper export bindings (hoist)
-  function subscribeToRobots(cb) {
-    return subscribeTo("robots", cb);
-  }
-  function subscribeToDevices(cb) {
-    return subscribeTo("devices", cb);
-  }
-  function subscribeToAlerts(cb) {
-    return subscribeTo("alerts", cb);
-  }
-  function subscribeToCareLogs(cb) {
-    return subscribeTo("care_logs", cb);
-  }
 })();
