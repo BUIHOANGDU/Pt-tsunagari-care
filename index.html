@@ -3,182 +3,299 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>TsunagariCare Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <title>TsunagariCare | Care Operations Dashboard</title>
     <link rel="stylesheet" href="src/css/style.css" />
   </head>
   <body>
+    <a href="#main-content" class="skip-link">Bỏ qua tới nội dung</a>
+
     <header class="topbar">
       <div class="topbar-inner">
-        <div class="logo">
-          <svg
-            width="36"
-            height="36"
-            viewBox="0 0 24 24"
-            fill="none"
-            xmlns="http://www.w3.org/2000/svg"
-            aria-hidden
-          >
-            <circle cx="12" cy="12" r="10" fill="#0b6e4f" />
-            <path
-              d="M8 12c1.333-2 3.333-2 4 0 0 2-2 4-4 4s-2-2-2-4z"
-              fill="#fff"
-              opacity="0.9"
-            />
-          </svg>
-          <div class="brand">
-            <h1>TsunagariCare</h1>
-            <div class="subtitle">つながりケア — Demo Dashboard</div>
-          </div>
-        </div>
-        <nav class="top-actions">
-          <div id="user-badge">Demo Mode</div>
+        <a class="brand-mark" href="#main-content" aria-label="TsunagariCare">
+          <span class="brand-logo" aria-hidden="true">
+            <svg viewBox="0 0 32 32" role="img">
+              <path
+                d="M16 3.5c6.9 0 12.5 5.1 12.5 11.3 0 7.4-7.6 11.8-11.9 13.5a1.7 1.7 0 0 1-1.2 0C11.1 26.6 3.5 22.2 3.5 14.8 3.5 8.6 9.1 3.5 16 3.5Z"
+              />
+              <path
+                d="M10.2 15.4c2.4-4.1 5.7-4.2 7.1-.8.7 1.8-.1 4.1-2.3 5.6-2.1 1.4-4.3.8-5.2-.8-.7-1.2-.7-2.6.4-4Z"
+              />
+              <path
+                d="M17.8 14.2c1-2.2 3.4-2.8 4.8-1.2 1.7 1.9.5 5-2 6-2.2.9-4.4-.3-4.3-2.2 0-.8.4-1.8 1.5-2.6Z"
+              />
+            </svg>
+          </span>
+          <span>
+            <strong>TsunagariCare</strong>
+            <small>Remote care operations</small>
+          </span>
+        </a>
+
+        <nav class="top-actions" aria-label="Trạng thái hệ thống">
+          <span class="status-pill status-online">Live demo</span>
+          <span id="user-badge">Care team</span>
         </nav>
       </div>
     </header>
 
-    <main class="container">
-      <!-- Hero & Overview Section -->
-      <section class="hero-section">
-        <div class="hero-compact">
-          <h1>TsunagariCare Dashboard</h1>
-          <p>Real-time monitoring and control for elderly care</p>
+    <main id="main-content" class="container">
+      <section class="hero-section" aria-labelledby="page-title">
+        <div class="hero-copy">
+          <p class="eyebrow">Dashboard chăm sóc người cao tuổi</p>
+          <h1 id="page-title">Theo dõi robot, thiết bị và cảnh báo theo thời gian thực.</h1>
+          <p>
+            Một màn hình vận hành tập trung cho gia đình và đội chăm sóc: rõ trạng thái,
+            dễ phản hồi, đủ tin cậy để demo thương mại.
+          </p>
         </div>
 
-        <div class="overview-stats">
-          <article class="stat-card">
-            <div class="stat-icon robot-icon">🤖</div>
-            <div class="stat-content">
-              <p class="stat-label">Robot Status</p>
-              <p class="stat-value" id="robot-status-text">—</p>
+        <div class="hero-live-panel" aria-label="Tóm tắt vận hành">
+          <div class="live-panel-top">
+            <span class="live-dot"></span>
+            <span>Care room live</span>
+          </div>
+          <div class="live-metrics">
+            <div>
+              <small>Response</small>
+              <strong>1m 42s</strong>
             </div>
-          </article>
-
-          <article class="stat-card">
-            <div class="stat-icon battery-icon">🔋</div>
-            <div class="stat-content">
-              <p class="stat-label">Battery</p>
-              <p class="stat-value" id="robot-battery-text">—%</p>
+            <div>
+              <small>Uptime</small>
+              <strong>99.8%</strong>
             </div>
-          </article>
-
-          <article class="stat-card">
-            <div class="stat-icon devices-icon">🏠</div>
-            <div class="stat-content">
-              <p class="stat-label">Devices</p>
-              <p class="stat-value" id="devices-count">0</p>
+          </div>
+          <div class="care-line">
+            <span></span>
+            <div>
+              <strong>Chami đã xác nhận hiện diện</strong>
+              <small>Phòng khách · vừa cập nhật</small>
             </div>
-          </article>
-
-          <article class="stat-card">
-            <div class="stat-icon health-icon">⚕️</div>
-            <div class="stat-content">
-              <p class="stat-label">Health</p>
-              <p class="stat-value" id="user-state-text">—</p>
-            </div>
-          </article>
-
-          <article class="stat-card stat-danger">
-            <div class="stat-icon alert-icon">⚠️</div>
-            <div class="stat-content">
-              <p class="stat-label">Alerts</p>
-              <p class="stat-value" id="alerts-count">0</p>
-            </div>
-          </article>
+          </div>
+          <div class="hero-actions" aria-label="Thao tác nhanh">
+            <a class="btn primary" href="#alerts-card">Xem cảnh báo</a>
+            <a class="btn secondary" href="#devices-card">Quản lý thiết bị</a>
+          </div>
         </div>
+      </section>
+
+      <section class="signal-strip" aria-label="Tín hiệu vận hành">
+        <span>LINE Notify sẵn sàng</span>
+        <span>Firebase realtime</span>
+        <span>Robot Chami online</span>
+        <span>Smart home linked</span>
+      </section>
+
+      <section class="overview-stats" aria-label="Tổng quan nhanh">
+        <article class="stat-card stat-primary">
+          <span class="stat-icon robot-icon" aria-hidden="true"></span>
+          <div class="stat-content">
+            <p class="stat-label">Robot</p>
+            <p class="stat-value" id="robot-status-text">Đang tải</p>
+          </div>
+        </article>
+
+        <article class="stat-card stat-blue">
+          <span class="stat-icon battery-icon" aria-hidden="true"></span>
+          <div class="stat-content">
+            <p class="stat-label">Pin</p>
+            <p class="stat-value" id="robot-battery-text">--</p>
+          </div>
+        </article>
+
+        <article class="stat-card stat-neutral">
+          <span class="stat-icon devices-icon" aria-hidden="true"></span>
+          <div class="stat-content">
+            <p class="stat-label">Thiết bị</p>
+            <p class="stat-value" id="devices-count">0</p>
+          </div>
+        </article>
+
+        <article class="stat-card stat-success">
+          <span class="stat-icon health-icon" aria-hidden="true"></span>
+          <div class="stat-content">
+            <p class="stat-label">Sức khỏe</p>
+            <p class="stat-value" id="user-state-text">Ổn định</p>
+          </div>
+        </article>
+
+        <article class="stat-card stat-danger">
+          <span class="stat-icon alert-icon" aria-hidden="true"></span>
+          <div class="stat-content">
+            <p class="stat-label">Cảnh báo</p>
+            <p class="stat-value" id="alerts-count">0</p>
+          </div>
+        </article>
       </section>
 
       <section class="dashboard-layout">
         <div class="primary-row">
-          <section class="panel-card robot-profile-card">
-            <div class="robot-header">
-              <div class="robot-avatar-large">🤖</div>
-              <div class="robot-info">
-                <h3>Chami</h3>
-                <p class="robot-subtitle">Care Assistant Robot</p>
+          <section class="panel-card robot-profile-card" aria-labelledby="robot-title">
+            <div class="section-heading">
+              <div>
+                <p class="section-kicker">Robot chăm sóc</p>
+                <h2 id="robot-title">Chami Assistant</h2>
               </div>
+              <span class="availability-dot" aria-label="Đang hoạt động"></span>
+            </div>
+
+            <div class="robot-visual" aria-hidden="true">
+              <div class="robot-avatar-large"></div>
+              <div class="signal-rings"></div>
             </div>
 
             <div class="robot-stats-compact">
               <div class="stat-mini">
-                <span class="label">Battery</span>
-                <strong id="robot-battery-display">—%</strong>
+                <span class="label">Pin</span>
+                <strong id="robot-battery-display">--</strong>
               </div>
               <div class="stat-mini">
-                <span class="label">Status</span>
-                <strong id="robot-status-display">—</strong>
+                <span class="label">Trạng thái</span>
+                <strong id="robot-status-display">Đang tải</strong>
               </div>
               <div class="stat-mini">
-                <span class="label">Connected</span>
+                <span class="label">Kết nối</span>
                 <strong id="devices-display">0</strong>
               </div>
             </div>
           </section>
 
-          <section class="panel-card alert-card">
-            <div class="section-title">
-              <span class="icon">⚠️</span>
-              <h3>Alert Center</h3>
+          <section class="panel-card alert-card" id="alerts-card" aria-labelledby="alerts-title">
+            <div class="section-heading">
+              <div>
+                <p class="section-kicker">Ưu tiên cao</p>
+                <h2 id="alerts-title">Trung tâm cảnh báo</h2>
+              </div>
             </div>
             <div id="alerts-list" class="alerts-compact"></div>
             <div class="btn-row">
-              <button id="btn-sim-fall">🚨 Fall Alert</button>
-              <button id="btn-sim-robot-offline">🔌 Offline</button>
+              <button id="btn-sim-fall" class="danger">Tạo cảnh báo ngã</button>
+              <button id="btn-sim-robot-offline">Robot mất kết nối</button>
             </div>
           </section>
         </div>
 
-        <section class="panel-card devices-card" id="devices-card">
-          <div class="section-title">
-            <span class="icon">🏠</span>
-            <h3>Smart Home Devices</h3>
+        <section
+          class="panel-card camera-device-card"
+          id="camera-device-card"
+          aria-labelledby="camera-device-title"
+        >
+          <div class="section-heading">
+            <div>
+              <p class="section-kicker">Camera device</p>
+              <h2 id="camera-device-title">Camera Device Status</h2>
+            </div>
+            <span
+              id="camera-device-status-badge"
+              class="camera-device-status status-offline"
+            >
+              offline
+            </span>
+          </div>
+          <div id="camera-device-details" class="camera-device-details"></div>
+        </section>
+
+        <section
+          class="panel-card fall-alerts-card"
+          id="fall-alerts-card"
+          aria-labelledby="fall-alerts-title"
+        >
+          <div class="section-heading">
+            <div>
+              <p class="section-kicker">Camera safety</p>
+              <h2 id="fall-alerts-title">Fall Detection Alerts</h2>
+            </div>
+            <a
+              class="btn secondary"
+              href="fall-camera.html"
+              target="_blank"
+              rel="noopener"
+            >
+              Open Fall Camera
+            </a>
+          </div>
+          <div class="fall-alert-groups">
+            <section class="fall-alert-group" aria-labelledby="active-fall-alerts-title">
+              <h3 id="active-fall-alerts-title">Active Fall Alerts</h3>
+              <div id="active-fall-alerts-list" class="fall-alerts-list"></div>
+            </section>
+
+            <details class="fall-alert-group fall-alert-history">
+              <summary>▶ Resolved Fall History</summary>
+              <div id="resolved-fall-alerts-list" class="fall-alerts-list"></div>
+            </details>
+          </div>
+        </section>
+
+        <section class="panel-card devices-card" id="devices-card" aria-labelledby="devices-title">
+          <div class="section-heading">
+            <div>
+              <p class="section-kicker">Nhà thông minh</p>
+              <h2 id="devices-title">Thiết bị đang kết nối</h2>
+            </div>
           </div>
           <div id="devices-list" class="devices-compact-grid"></div>
         </section>
 
-        <section class="panel-card health-card" id="health-card">
-          <div class="section-title">
-            <span class="icon">⚕️</span>
-            <h3>Health Timeline</h3>
-          </div>
-          <div id="care-logs" class="timeline-compact"></div>
-          <div class="btn-row">
-            <button id="btn-medicine-done">💊 Đã uống</button>
-            <button id="btn-medicine-missed">🚫 Chưa uống</button>
-            <button id="btn-ate">🍽️ Đã ăn</button>
-            <button id="btn-no-response">📞 Không phản hồi</button>
-          </div>
-        </section>
+        <div class="secondary-row">
+          <section class="panel-card health-card" id="health-card" aria-labelledby="health-title">
+            <div class="section-heading">
+              <div>
+                <p class="section-kicker">Nhật ký chăm sóc</p>
+                <h2 id="health-title">Hoạt động gần đây</h2>
+              </div>
+            </div>
+            <div id="care-logs" class="timeline-compact"></div>
+            <div class="btn-row">
+              <button id="btn-medicine-done">Đã uống thuốc</button>
+              <button id="btn-medicine-missed">Chưa uống thuốc</button>
+              <button id="btn-ate">Đã ăn</button>
+              <button id="btn-no-response">Không phản hồi</button>
+            </div>
+          </section>
 
-        <section class="panel-card commands-card">
-          <div class="section-title">
-            <span class="icon">📤</span>
-            <h3>Command Queue</h3>
-          </div>
-          <div id="commands-list" class="commands-compact"></div>
-          <div class="btn-row">
-            <button id="btn-refresh-commands">↻ Refresh</button>
-          </div>
-        </section>
+          <section class="panel-card commands-card" aria-labelledby="commands-title">
+            <div class="section-heading">
+              <div>
+                <p class="section-kicker">Điều khiển</p>
+                <h2 id="commands-title">Hàng đợi lệnh</h2>
+              </div>
+            </div>
+            <div id="commands-list" class="commands-compact"></div>
+            <div class="btn-row">
+              <button id="btn-refresh-commands">Làm mới lệnh</button>
+            </div>
+          </section>
+        </div>
 
-        <section class="panel-card demo-card" id="demo-card">
-          <div class="section-title">
-            <span class="icon">⚙️</span>
-            <h3>Developer Demo Controls</h3>
+        <section class="panel-card demo-card" id="demo-card" aria-labelledby="demo-title">
+          <div class="section-heading">
+            <div>
+              <p class="section-kicker">Demo bán hàng</p>
+              <h2 id="demo-title">Kịch bản trình diễn</h2>
+            </div>
           </div>
           <div class="btn-row">
-            <button id="demo-robot-online" class="primary">🟢 Online</button>
-            <button id="demo-robot-offline">🔴 Offline</button>
-            <button id="demo-low-battery">🔋 Low Battery</button>
-            <button id="demo-fall">🚨 Fall</button>
-            <button id="demo-medicine-done">💊 Medicine</button>
-            <button id="demo-no-response">📞 No Response</button>
-            <button id="demo-toggle-light">💡 Light</button>
+            <button id="demo-robot-online" class="primary">Robot online</button>
+            <button id="demo-robot-offline">Robot offline</button>
+            <button id="demo-low-battery">Pin yếu</button>
+            <button id="demo-fall" class="danger">Phát hiện ngã</button>
+            <button id="demo-medicine-done">Uống thuốc</button>
+            <button id="demo-no-response">Không phản hồi</button>
+            <button id="demo-toggle-light">Bật đèn</button>
           </div>
         </section>
       </section>
     </main>
+
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
     <script src="src/js/firebase-config.js"></script>
     <script src="src/js/firebase-service.js"></script>
     <script src="src/js/dashboard.js"></script>

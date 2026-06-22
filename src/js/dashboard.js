@@ -1,6 +1,10 @@
 // Dashboard (mock-first; subscribes to realtime if Firestore configured)
 FirebaseService.seedMockData && FirebaseService.seedMockData();
 
+const SMART_HOME_DEVICE_ID = "smart_home_001";
+const LIGHT_DEVICE_ID = "light_001";
+const LEGACY_LIGHT_DEVICE_ID = "light01";
+
 function updateRobotSection(robot) {
   // Update overview cards
   document.getElementById("robot-status-text").textContent =
@@ -24,6 +28,139 @@ function updateDevicesSection(devices) {
   renderDevices(devices);
 }
 
+let latestBridgeRobot = null;
+let latestLegacyRobot = null;
+
+function isBridgeChamiDevice(device) {
+  return device?.id === "chami_001" || device?.type === "ai_robot";
+}
+
+function getDeviceId(device) {
+  return device?.id || device?.deviceId || "";
+}
+
+function isLightDevice(device) {
+  const id = getDeviceId(device);
+  return (
+    id === LIGHT_DEVICE_ID ||
+    id === LEGACY_LIGHT_DEVICE_ID ||
+    device?.type === "light"
+  );
+}
+
+function getSmartHomeDevicesForDisplay(devices) {
+  const smartHomeDevices = (devices || []).filter(
+    (device) => !isBridgeChamiDevice(device),
+  );
+  const hasBridgeLight = smartHomeDevices.some(
+    (device) => getDeviceId(device) === LIGHT_DEVICE_ID,
+  );
+
+  if (!hasBridgeLight) {
+    return smartHomeDevices;
+  }
+
+  return smartHomeDevices.filter(
+    (device) => getDeviceId(device) !== LEGACY_LIGHT_DEVICE_ID,
+  );
+}
+
+function getLightCommandText(action) {
+  const textByAction = {
+    on: "Bật đèn phòng khách",
+    off: "Tắt đèn phòng khách",
+    toggle: "Đổi trạng thái đèn phòng khách",
+  };
+
+  return textByAction[action] || "Điều khiển đèn phòng khách";
+}
+
+async function createLightControlCommand(action) {
+  if (typeof FirebaseService.createDeviceControlCommand === "function") {
+    return FirebaseService.createDeviceControlCommand(LIGHT_DEVICE_ID, action, {
+      source: "dashboard",
+      target: SMART_HOME_DEVICE_ID,
+      text: getLightCommandText(action),
+    });
+  }
+
+  return FirebaseService.createCommand({
+    source: "dashboard",
+    target: SMART_HOME_DEVICE_ID,
+    type: "device_control",
+    device: LIGHT_DEVICE_ID,
+    action,
+    text: getLightCommandText(action),
+    status: "pending",
+  });
+}
+
+function pickRobotForDisplay() {
+  return latestBridgeRobot || latestLegacyRobot;
+}
+
+function normalizeRobotForDisplay(robot) {
+  if (!robot) {
+    return {
+      online: false,
+      statusText: "offline",
+      detailText: "offline",
+      batteryText: "--",
+      lastSeenText: "No recent update",
+    };
+  }
+
+  const hasOnlineFlag = typeof robot.online === "boolean";
+  const isOnline = hasOnlineFlag ? robot.online : robot.status === "online";
+  const state = robot.state || robot.status || (isOnline ? "online" : "offline");
+  const emotion = robot.emotion || "";
+  const detailParts = [isOnline ? "online" : "offline", state, emotion].filter(
+    Boolean,
+  );
+  const lastSeen = robot.lastSeen || robot.updatedAt || robot.lastActive;
+
+  return {
+    online: isOnline,
+    statusText: isOnline ? "online" : "offline",
+    detailText: detailParts.join(" / "),
+    batteryText: robot.battery != null ? robot.battery + "%" : "--",
+    lastSeenText: lastSeen ? formatDateTime(lastSeen) : "No recent update",
+  };
+}
+
+updateRobotSection = function (robot) {
+  const display = normalizeRobotForDisplay(robot);
+
+  document.getElementById("robot-status-text").textContent = display.statusText;
+  document.getElementById("robot-battery-text").textContent =
+    display.batteryText;
+
+  const batteryDisplay = document.getElementById("robot-battery-display");
+  const statusDisplay = document.getElementById("robot-status-display");
+  const lastSeenDisplay = document.getElementById("devices-display");
+  const availabilityDot = document.querySelector(".availability-dot");
+
+  if (batteryDisplay) batteryDisplay.textContent = display.batteryText;
+  if (statusDisplay) statusDisplay.textContent = display.detailText;
+  if (lastSeenDisplay) lastSeenDisplay.textContent = display.lastSeenText;
+  if (availabilityDot) {
+    availabilityDot.classList.toggle("status-offline", !display.online);
+  }
+};
+
+updateDevicesSection = function (devices) {
+  const data = devices || [];
+  const smartHomeDevices = getSmartHomeDevicesForDisplay(data);
+  const bridgeRobot = data.find((device) => device?.id === "chami_001");
+
+  latestBridgeRobot = bridgeRobot || null;
+  updateRobotSection(pickRobotForDisplay());
+
+  document.getElementById("devices-count").textContent =
+    smartHomeDevices.length || 0;
+  renderDevices(smartHomeDevices);
+};
+
 function updateAlertsSection(alerts) {
   document.getElementById("alerts-count").textContent = alerts.length || 0;
   renderAlerts(alerts);
@@ -40,16 +177,34 @@ function renderDevices(devices) {
   devices.forEach((d) => {
     const item = document.createElement("div");
     item.className = "device-item";
+    const isLight = isLightDevice(d);
+    const deviceDetail = isLight
+      ? d.status === "on"
+        ? "Đèn đang bật"
+        : "Đèn đang tắt"
+      : d.room || "";
     const leftDiv = document.createElement("div");
     leftDiv.className = "left";
-    leftDiv.innerHTML = `<strong>${d.name}</strong><small>${d.room || ""}</small>`;
+    leftDiv.innerHTML = `<strong>${d.name}</strong><small>${deviceDetail}</small>`;
 
     const btn = document.createElement("button");
     btn.className = "device-toggle";
     btn.dataset.id = d.id || d.deviceId || "";
-    btn.textContent = (d.status === "on" ? "✓ " : "") + "Toggle";
+    btn.textContent = isLight
+      ? d.status === "on"
+        ? "Tắt đèn"
+        : "Bật đèn"
+      : (d.status === "on" ? "✓ " : "") + "Toggle";
     btn.onclick = async () => {
       const id = btn.dataset.id;
+
+      if (isLight) {
+        const action = d.status === "on" ? "off" : "on";
+        await createLightControlCommand(action);
+        alert("Smart home command created");
+        return;
+      }
+
       await FirebaseService.createCommand({
         targetType: "device",
         targetId: id,
@@ -80,7 +235,8 @@ function getAlertTypeLabel(type) {
 function getAlertSourceLabel(source) {
   const labels = {
     camera_ai: "Camera AI",
-    robot_chami: "Robot Chami",
+    chami_001: "Chami Robot",
+    robot_chami: "Chami Robot",
     health_module: "Health Module",
     smart_home: "Smart Home",
     web_dashboard: "Web Dashboard",
@@ -100,6 +256,14 @@ function getLineStatusLabel(status) {
   return labels[status] || "LINE: Demo";
 }
 
+function getTimeValue(value) {
+  if (!value) return 0;
+  if (typeof value.toDate === "function") return value.toDate().getTime();
+
+  const time = new Date(value).getTime();
+  return Number.isNaN(time) ? 0 : time;
+}
+
 function formatDateTime(value) {
   if (!value) return "Không rõ thời gian";
 
@@ -110,6 +274,381 @@ function formatDateTime(value) {
 
   return new Date(value).toLocaleString("vi-VN");
 }
+formatDateTime = function (value) {
+  if (!value) return "Unknown time";
+
+  if (typeof value.toDate === "function") {
+    return value.toDate().toLocaleString("ja-JP");
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "Unknown time";
+  }
+
+  return date.toLocaleString("ja-JP");
+};
+
+function formatConfidence(value) {
+  if (typeof value !== "number") return "N/A";
+  return `${Math.round(value * 100)}%`;
+}
+
+function getFallAlertStatusClass(status) {
+  const classes = {
+    suspected: "fall-status-suspected",
+    confirmed: "fall-status-confirmed",
+    resolved: "fall-status-resolved",
+    cancelled: "fall-status-cancelled",
+  };
+
+  return classes[status] || "fall-status-unknown";
+}
+
+function canResolveFallAlert(status) {
+  return status === "suspected" || status === "confirmed";
+}
+
+function renderCameraDeviceStatus(camera) {
+  const badge = document.getElementById("camera-device-status-badge");
+  const details = document.getElementById("camera-device-details");
+
+  if (!badge || !details) return;
+
+  const data = camera || {
+    name: "Living Room Camera",
+    location: "living_room",
+    status: "offline",
+    deviceType: "webcam",
+    aiModel: "none_mvp",
+  };
+  const status = data.status || "offline";
+
+  badge.textContent = status;
+  badge.classList.toggle("status-online", status === "online");
+  badge.classList.toggle("status-offline", status !== "online");
+
+  details.innerHTML = "";
+
+  [
+    ["Name", data.name || "Unknown camera"],
+    ["Location", data.location || "unknown"],
+    ["Device type", data.deviceType || "unknown"],
+    ["AI model", data.aiModel || "unknown"],
+    ["Last seen", formatDateTime(data.lastSeen || data.updatedAt)],
+  ].forEach(([label, value]) => {
+    const item = document.createElement("div");
+    const title = document.createElement("dt");
+    const content = document.createElement("dd");
+
+    title.textContent = label;
+    content.textContent = value;
+
+    item.appendChild(title);
+    item.appendChild(content);
+    details.appendChild(item);
+  });
+}
+
+function createFallAlertItem(alert, options = {}) {
+  const item = document.createElement("article");
+  item.className = "fall-alert-item";
+
+  const header = document.createElement("div");
+  header.className = "fall-alert-header";
+
+  const location = document.createElement("strong");
+  location.textContent = alert.location || "unknown_location";
+
+  const status = document.createElement("span");
+  status.className = `fall-alert-status ${getFallAlertStatusClass(alert.status)}`;
+  status.textContent = alert.status || "unknown";
+
+  const headerActions = document.createElement("div");
+  headerActions.className = "fall-alert-actions";
+
+  headerActions.appendChild(status);
+
+  if (options.canResolve && canResolveFallAlert(alert.status)) {
+    const notifyButton = document.createElement("button");
+    notifyButton.className = "fall-alert-notify";
+    notifyButton.type = "button";
+    notifyButton.textContent = "Notify Chami";
+    notifyButton.addEventListener("click", () => {
+      notifyButton.disabled = true;
+      notifyChamiForFallAlert(alert.id).catch(() => {
+        notifyButton.disabled = false;
+      });
+    });
+    headerActions.appendChild(notifyButton);
+
+    const resolveButton = document.createElement("button");
+    resolveButton.className = "fall-alert-resolve";
+    resolveButton.type = "button";
+    resolveButton.textContent = "Mark as resolved";
+    resolveButton.addEventListener("click", () => {
+      resolveButton.disabled = true;
+      markFallAlertResolved(alert.id).catch(() => {
+        resolveButton.disabled = false;
+      });
+    });
+    headerActions.appendChild(resolveButton);
+  }
+
+  header.appendChild(location);
+  header.appendChild(headerActions);
+
+  const meta = document.createElement("dl");
+  meta.className = "fall-alert-meta";
+
+  [
+    ["Confidence", formatConfidence(alert.confidence)],
+    ["Camera", alert.cameraId || "unknown"],
+    ["Created", formatDateTime(alert.createdAt)],
+  ].forEach(([label, value]) => {
+    const group = document.createElement("div");
+    const dt = document.createElement("dt");
+    const dd = document.createElement("dd");
+
+    dt.textContent = label;
+    dd.textContent = value;
+
+    group.appendChild(dt);
+    group.appendChild(dd);
+    meta.appendChild(group);
+  });
+
+  const note = document.createElement("p");
+  note.className = "fall-alert-note";
+  note.textContent = alert.note || "";
+
+  item.appendChild(header);
+  item.appendChild(meta);
+  item.appendChild(note);
+
+  return item;
+}
+
+function renderFallAlertList(el, alerts, emptyMessage, options = {}) {
+  if (!el) return;
+
+  el.innerHTML = "";
+
+  if (!alerts || alerts.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    empty.textContent = emptyMessage;
+    el.appendChild(empty);
+    return;
+  }
+
+  alerts.forEach((alert) => {
+    el.appendChild(createFallAlertItem(alert, options));
+  });
+}
+
+function renderFallAlerts(alerts) {
+  const activeList = document.getElementById("active-fall-alerts-list");
+  const resolvedList = document.getElementById("resolved-fall-alerts-list");
+
+  if (!activeList || !resolvedList) return;
+
+  const data = alerts || [];
+  const activeAlerts = data.filter((alert) => canResolveFallAlert(alert.status));
+  const allResolvedAlerts = data.filter((alert) => alert.status === "resolved");
+  const resolvedAlerts = allResolvedAlerts.slice(0, 3);
+  const hiddenResolvedCount = Math.max(
+    allResolvedAlerts.length - resolvedAlerts.length,
+    0,
+  );
+
+  renderFallAlertList(activeList, activeAlerts, "No active fall alerts", {
+    canResolve: true,
+  });
+  renderFallAlertList(
+    resolvedList,
+    resolvedAlerts,
+    "No resolved fall alerts yet",
+  );
+
+  if (hiddenResolvedCount > 0) {
+    const more = document.createElement("div");
+    more.className = "compact-more";
+    more.textContent = `+ ${hiddenResolvedCount} more resolved alerts`;
+    resolvedList.appendChild(more);
+  }
+}
+
+function setupResolvedFallHistoryToggle() {
+  const details = document.querySelector(".fall-alert-history");
+  const summary = details?.querySelector("summary");
+
+  if (!details || !summary) return;
+
+  const updateSummary = () => {
+    summary.textContent = `${details.open ? "▼" : "▶"} Resolved Fall History`;
+  };
+
+  updateSummary();
+  details.addEventListener("toggle", updateSummary);
+}
+
+function getFirebaseConfig() {
+  if (window.firebaseConfig) return window.firebaseConfig;
+
+  try {
+    if (typeof firebaseConfig !== "undefined") return firebaseConfig;
+  } catch (error) {
+    return null;
+  }
+
+  return null;
+}
+
+function getFirestoreForDashboard() {
+  const config = getFirebaseConfig();
+
+  if (!window.firebase || typeof firebase.initializeApp !== "function") {
+    return null;
+  }
+
+  if (!config || typeof firebase.firestore !== "function") {
+    return null;
+  }
+
+  if (!firebase.apps || !firebase.apps.length) {
+    firebase.initializeApp(config);
+  }
+
+  return firebase.firestore();
+}
+
+function addFallCameraLocalLog(message) {
+  const key = "tsunagari_fall_camera_log";
+
+  try {
+    const logs = JSON.parse(localStorage.getItem(key)) || [];
+    logs.unshift({
+      cameraId: "default_cam",
+      location: "living_room",
+      message,
+      timestamp: new Date().toISOString(),
+    });
+    localStorage.setItem(key, JSON.stringify(logs.slice(0, 50)));
+  } catch (error) {
+    console.warn("Fall camera local log failed.", error);
+  }
+}
+
+function subscribeToCameraDeviceStatus() {
+  renderCameraDeviceStatus(null);
+
+  try {
+    const db = getFirestoreForDashboard();
+
+    if (!db) {
+      console.warn("Camera device: Firestore is not configured.");
+      return null;
+    }
+
+    return db
+      .collection("cameras")
+      .doc("default_cam")
+      .onSnapshot(
+        (snapshot) => {
+          renderCameraDeviceStatus(
+            snapshot.exists ? { id: snapshot.id, ...snapshot.data() } : null,
+          );
+        },
+        (error) => {
+          console.warn("Camera device realtime listener failed.", error);
+          renderCameraDeviceStatus(null);
+        },
+      );
+  } catch (error) {
+    console.warn("Camera device subscription failed.", error);
+    renderCameraDeviceStatus(null);
+    return null;
+  }
+}
+
+async function markFallAlertResolved(alertId) {
+  if (!alertId) return;
+
+  const db = getFirestoreForDashboard();
+
+  if (!db) {
+    console.warn("Fall alerts: Firestore is not configured.");
+    return;
+  }
+
+  const timestamp = firebase.firestore.FieldValue.serverTimestamp();
+
+  await db.collection("fallAlerts").doc(alertId).update({
+    status: "resolved",
+    resolvedAt: timestamp,
+    updatedAt: timestamp,
+  });
+
+  addFallCameraLocalLog("Fall alert resolved");
+}
+
+async function notifyChamiForFallAlert(alertId) {
+  if (!alertId) return;
+
+  const db = getFirestoreForDashboard();
+
+  if (!db) {
+    console.warn("Notify Chami: Firestore is not configured.");
+    return;
+  }
+
+  await db.collection("commands").add({
+    target: "chami_robot",
+    type: "speak",
+    status: "pending",
+    message: "Có vẻ như có người bị ngã ở phòng khách. Tôi sẽ kiểm tra ngay.",
+    source: "fall_detection",
+    alertId,
+    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+  });
+}
+
+function subscribeToFallAlerts() {
+  renderFallAlerts([]);
+
+  try {
+    const db = getFirestoreForDashboard();
+
+    if (!db) {
+      console.warn("Fall alerts: Firestore is not configured.");
+      return null;
+    }
+
+    return db
+      .collection("fallAlerts")
+      .orderBy("createdAt", "desc")
+      .onSnapshot(
+        (snapshot) => {
+          const alerts = snapshot.docs.map((doc) => ({
+            id: doc.id,
+            ...doc.data(),
+          }));
+          renderFallAlerts(alerts);
+        },
+        (error) => {
+          console.warn("Fall alerts realtime listener failed.", error);
+          renderFallAlerts([]);
+        },
+      );
+  } catch (error) {
+    console.warn("Fall alerts subscription failed.", error);
+    renderFallAlerts([]);
+    return null;
+  }
+}
+
 function renderAlerts(alerts) {
   const el = document.getElementById("alerts-list");
   el.innerHTML = "";
@@ -143,6 +682,61 @@ function renderAlerts(alerts) {
   });
 }
 
+renderAlerts = function (alerts) {
+  const el = document.getElementById("alerts-list");
+  el.innerHTML = "";
+  const data = alerts || [];
+
+  if (data.length === 0) {
+    el.innerHTML =
+      '<div style="padding: 12px; color: #6b7280; text-align: center; font-size: 0.9rem;">No alerts</div>';
+    return;
+  }
+
+  const priorityAlerts = data.filter(
+    (alert) =>
+      alert.status === "new" ||
+      alert.level === "danger" ||
+      alert.source === "chami_001",
+  );
+  const selectedAlerts = (priorityAlerts.length > 0 ? priorityAlerts : data)
+    .slice()
+    .sort((a, b) => getTimeValue(b.createdAt) - getTimeValue(a.createdAt))
+    .slice(0, 1);
+  const hiddenCount = Math.max(data.length - selectedAlerts.length, 0);
+
+  selectedAlerts.forEach((a) => {
+    const row = document.createElement("div");
+    row.className = `alert-item alert-${a.level || "warning"}`;
+
+    const meta = [
+      formatDateTime(a.createdAt),
+      getAlertSourceLabel(a.source),
+      a.lineStatus ? getLineStatusLabel(a.lineStatus) : "",
+    ].filter(Boolean);
+
+    row.innerHTML = `
+      <div class="left">
+        <strong>${getAlertTypeLabel(a.type)}</strong>
+        <small>${a.message || ""}</small>
+
+        <div class="alert-meta">
+          ${meta.map((item) => `<span>${item}</span>`).join("<span>/</span>")}
+        </div>
+      </div>
+    `;
+
+    el.appendChild(row);
+  });
+
+  if (hiddenCount > 0) {
+    const more = document.createElement("div");
+    more.className = "compact-more";
+    more.textContent = `+ ${hiddenCount} other alerts`;
+    el.appendChild(more);
+  }
+};
+
 function renderCareLogs(logs) {
   const el = document.getElementById("care-logs");
   el.innerHTML = "";
@@ -166,32 +760,70 @@ function renderCareLogs(logs) {
 }
 
 // Commands UI
+function getCommandTitle(command) {
+  return (
+    command?.command ||
+    command?.type ||
+    command?.action ||
+    "unknown"
+  );
+}
+
+function getCommandDetail(command) {
+  if (command?.device && command?.action) {
+    return `${command.device} / ${command.action}`;
+  }
+
+  return (
+    command?.targetId ||
+    command?.device ||
+    command?.target ||
+    command?.text ||
+    ""
+  );
+}
+
 function renderCommands(cmds) {
   const el = document.getElementById("commands-list");
   el.innerHTML = "";
-  if (!cmds || cmds.length === 0) {
+  const pendingCommands = (cmds || [])
+    .filter((command) => (command.status || "pending") === "pending")
+    .slice()
+    .sort((a, b) => getTimeValue(b.createdAt) - getTimeValue(a.createdAt));
+  const visibleCommands = pendingCommands.slice(0, 2);
+  const hiddenCount = Math.max(pendingCommands.length - visibleCommands.length, 0);
+
+  if (visibleCommands.length === 0) {
     el.innerHTML =
-      '<div style="padding: 12px; color: #6b7280; text-align: center; font-size: 0.9rem;">No commands</div>';
+      '<div style="padding: 12px; color: #6b7280; text-align: center; font-size: 0.9rem;">No pending commands</div>';
     return;
   }
-  cmds.slice(0, 5).forEach((c) => {
+  visibleCommands.forEach((c) => {
     const row = document.createElement("div");
     row.className = "commands-item";
+    const status = c.status || "pending";
     const statusClass =
-      c.status === "completed"
+      status === "completed" || status === "done"
         ? "cmd-completed"
-        : c.status === "failed"
+        : status === "failed"
           ? "cmd-failed"
           : "cmd-pending";
     row.innerHTML = `
       <div>
-        <strong>${c.command}</strong>
-        <small>${c.targetId || ""}</small>
+        <strong>${getCommandTitle(c)}</strong>
+        <small>${getCommandDetail(c)}</small>
       </div>
-      <span class="cmd-status ${statusClass}">${c.status || "pending"}</span>
+      <span class="cmd-status ${statusClass}">${status.toUpperCase()}</span>
     `;
     el.appendChild(row);
   });
+
+  if (hiddenCount > 0) {
+    const more = document.createElement("div");
+    more.className = "compact-more";
+    more.textContent = `+ ${hiddenCount} other pending commands`;
+    el.appendChild(more);
+  }
 }
 
 document
@@ -301,23 +933,16 @@ document.getElementById("demo-no-response").onclick = async () => {
   });
 };
 document.getElementById("demo-toggle-light").onclick = async () => {
-  await FirebaseService.createCommand({
-    targetType: "device",
-    targetId: "light01",
-    command: "toggle",
-    status: "pending",
-    source: "demo",
-  });
+  await createLightControlCommand("toggle");
 };
 
 // subscribe to realtime updates (works with Firestore or local fallback)
 if (typeof FirebaseService.subscribeToRobots === "function") {
   FirebaseService.subscribeToRobots((data) => {
-    // robots data may be array (local) or array of docs (firestore)
+    // robots data may be array (local/realtime) or a single object.
     const first = Array.isArray(data) ? data[0] : data;
-    updateRobotSection(
-      first || { name: "Chami", status: "offline", battery: 0 },
-    );
+    latestLegacyRobot = first || { name: "Chami", status: "offline", battery: 0 };
+    updateRobotSection(pickRobotForDisplay());
   });
 }
 
@@ -341,10 +966,15 @@ if (typeof FirebaseService.subscribeToCommands === "function") {
   FirebaseService.subscribeToCommands((data) => renderCommands(data || []));
 }
 
+setupResolvedFallHistoryToggle();
+subscribeToCameraDeviceStatus();
+subscribeToFallAlerts();
+
 // initial fetch to populate UI immediately
 (async () => {
   const r = await FirebaseService.getRobot("chami01");
-  updateRobotSection(r || { name: "Chami", status: "offline", battery: 0 });
+  latestLegacyRobot = r || { name: "Chami", status: "offline", battery: 0 };
+  updateRobotSection(pickRobotForDisplay());
   const devices = await FirebaseService.listDevices();
   updateDevicesSection(devices || []);
   const alerts = await FirebaseService.listAlerts();

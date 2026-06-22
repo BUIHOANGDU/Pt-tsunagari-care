@@ -31,6 +31,7 @@ Important: Mock-first approach
 - The Web Dashboard is mock-first: it runs fully with localStorage demo data and does not require a real Robot or ESP32.
 - `Robot AI Module` and `Smart Home Module` are being developed separately; this dashboard provides Firestore schema and a command system so those modules can connect later.
 - Commands created by the dashboard are stored in the `commands` collection (or `mock:commands` in localStorage) with `status: pending`.
+- Fall Detection Camera uses MediaPipe Pose in the browser. Video is processed locally and not uploaded. Only detection metadata is stored in Firestore.
 
 Firebase integration (quick guide):
 

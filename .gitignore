@@ -5,3 +5,6 @@ dist/
 
 # Firebase real config - do not commit
 src/js/firebase-config.js
+*.serviceAccount.json
+serviceAccountKey.json
+firebase-adminsdk*.json

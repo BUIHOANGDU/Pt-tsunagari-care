@@ -56,6 +56,19 @@ const FirebaseService = (function () {
     return new Date().toISOString();
   }
 
+  function realtimeServerTs() {
+    if (
+      useRealtime &&
+      window.firebase &&
+      firebase.database &&
+      firebase.database.ServerValue
+    ) {
+      return firebase.database.ServerValue.TIMESTAMP;
+    }
+
+    return serverTs();
+  }
+
   function sortByCreatedAtDesc(arr) {
     return arr.sort((a, b) => {
       const ta = new Date(a.createdAt || a.updatedAt || 0).getTime();
@@ -217,6 +230,11 @@ const FirebaseService = (function () {
   // ---------- CRUD ----------
   async function getRobot(id = "chami01") {
     if (useRealtime) {
+      const bridgeRobot = await getRealtimeValue("devices/chami_001");
+      if (bridgeRobot) {
+        return { id: "chami_001", ...bridgeRobot };
+      }
+
       const data = await getRealtimeValue(`robots/${id}`);
       return data ? { id, ...data } : null;
     }
@@ -309,6 +327,46 @@ const FirebaseService = (function () {
 
     localStorage.setItem("mock:commands", JSON.stringify(arr));
     notifyLocal("commands");
+  }
+
+  async function createDeviceControlCommand(deviceId, action, options = {}) {
+    const payload = {
+      source: options.source || "dashboard",
+      target: options.target || "smart_home_001",
+      type: "device_control",
+      device: deviceId,
+      action,
+      text: options.text || "",
+      status: "pending",
+      createdAt: options.createdAt || realtimeServerTs(),
+    };
+
+    if (useRealtime) {
+      return pushRealtimeValue("commands", payload);
+    }
+
+    const arr = JSON.parse(localStorage.getItem("mock:commands") || "[]");
+    const data = {
+      id: options.id || "cmd_" + Date.now(),
+      ...payload,
+    };
+
+    arr.unshift(data);
+    localStorage.setItem("mock:commands", JSON.stringify(arr));
+    notifyLocal("commands");
+    return data;
+  }
+
+  async function createSmartHomeCommand(action) {
+    const textByAction = {
+      on: "Bật đèn phòng khách",
+      off: "Tắt đèn phòng khách",
+      toggle: "Đổi trạng thái đèn phòng khách",
+    };
+
+    return createDeviceControlCommand("light_001", action, {
+      text: textByAction[action] || "Điều khiển đèn phòng khách",
+    });
   }
 
   async function createCareLog(log) {
@@ -624,6 +682,8 @@ const FirebaseService = (function () {
     listCommands,
     updateCommandStatus,
     createCommand,
+    createDeviceControlCommand,
+    createSmartHomeCommand,
     createCareLog,
     createAlert,
     listAlerts,
