@@ -5,6 +5,35 @@ const { getDb, getServerTimestamp } = require("../firebaseAdmin");
 
 const router = express.Router();
 
+function getCommandTarget(command) {
+  return command?.targetDeviceId || command?.target || "";
+}
+
+function getCommandTimestamp(command) {
+  const raw = command?.createdAt || command?.updatedAt || 0;
+
+  if (typeof raw === "number") {
+    return raw;
+  }
+
+  const parsed = Date.parse(raw);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function getMissingCommandField(body = {}) {
+  const requiredFields = [
+    "targetDeviceId",
+    "type",
+    "device",
+    "action",
+  ];
+
+  return requiredFields.find((field) => {
+    const value = body[field];
+    return typeof value !== "string" || value.trim() === "";
+  });
+}
+
 router.post("/command", deviceAuth, async (req, res) => {
   const {
     source = "chami_001",
@@ -58,6 +87,68 @@ router.post("/command", deviceAuth, async (req, res) => {
   }
 });
 
+router.post("/commands", deviceAuth, async (req, res) => {
+  const missingField = getMissingCommandField(req.body);
+
+  if (missingField) {
+    return res.status(400).json({
+      ok: false,
+      error: "missing_field",
+      message: `${missingField} is required`,
+    });
+  }
+
+  const {
+    targetDeviceId,
+    source = "dashboard",
+    type,
+    device,
+    action,
+    key = "",
+    name = "",
+    category = "",
+    description = "",
+    status = "pending",
+  } = req.body;
+
+  const commandRef = getDb().ref("commands").push();
+  const now = new Date().toISOString();
+  const command = {
+    id: commandRef.key,
+    commandId: commandRef.key,
+    targetDeviceId,
+    target: targetDeviceId,
+    source,
+    type,
+    device,
+    action,
+    key,
+    name,
+    category,
+    description,
+    status: status || "pending",
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  try {
+    await commandRef.set(command);
+
+    return res.status(200).json({
+      ok: true,
+      commandId: commandRef.key,
+      command,
+    });
+  } catch (error) {
+    console.error("Smart home command queue write failed:", error);
+
+    return res.status(500).json({
+      ok: false,
+      error: error.message,
+    });
+  }
+});
+
 router.get("/commands/next", deviceAuth, async (req, res) => {
   const { deviceId } = req.query || {};
 
@@ -74,13 +165,10 @@ router.get("/commands/next", deviceAuth, async (req, res) => {
 
     const pendingCommands = Object.entries(commands)
       .filter(([, command]) => {
-        return command.target === deviceId && command.status === "pending";
+        return getCommandTarget(command) === deviceId && command.status === "pending";
       })
       .sort(([, commandA], [, commandB]) => {
-        const createdAtA = commandA.createdAt || 0;
-        const createdAtB = commandB.createdAt || 0;
-
-        return createdAtA - createdAtB;
+        return getCommandTimestamp(commandA) - getCommandTimestamp(commandB);
       });
 
     if (pendingCommands.length === 0) {
@@ -135,7 +223,7 @@ router.post("/commands/:commandId/done", deviceAuth, async (req, res) => {
 
     const command = snapshot.val();
 
-    if (command.target !== deviceId) {
+    if (getCommandTarget(command) !== deviceId) {
       return res.status(403).json({
         ok: false,
         error: "Forbidden",

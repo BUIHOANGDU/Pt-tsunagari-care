@@ -70,3 +70,28 @@ Note:
 
 - This keep-alive setup is intended for demo/dev usage.
 - For production, prefer a paid Render instance or a more suitable platform such as Firebase Hosting or Cloud Functions.
+
+Thunder Client test for Smart Home command queue:
+
+1. Send `POST /api/smart-home/commands`
+2. Add header `Content-Type: application/json`
+3. If `TSUNAGARI_DEVICE_TOKEN` is configured, add header `x-device-token: <your token>`
+4. Example body:
+
+```json
+{
+  "targetDeviceId": "smart_home_001",
+  "source": "dashboard",
+  "type": "ir_learn",
+  "device": "ir_hub_001",
+  "action": "start",
+  "key": "room_light_power",
+  "name": "Den phong bat tat",
+  "category": "light",
+  "description": "Nut bat tat den phong",
+  "status": "pending"
+}
+```
+
+5. Verify the response includes `ok: true` and a `commandId`
+6. Then call `GET /api/smart-home/commands/next?deviceId=smart_home_001` to confirm the command is visible in the queue
