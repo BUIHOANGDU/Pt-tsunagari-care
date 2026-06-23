@@ -95,3 +95,32 @@ Thunder Client test for Smart Home command queue:
 
 5. Verify the response includes `ok: true` and a `commandId`
 6. Then call `GET /api/smart-home/commands/next?deviceId=smart_home_001` to confirm the command is visible in the queue
+
+Thunder Client test for IR command storage:
+
+1. Send `POST /api/smart-home/ir-commands`
+2. Add header `Content-Type: application/json`
+3. If `TSUNAGARI_DEVICE_TOKEN` is configured, add header `x-device-token: <your token>`
+4. Example body:
+
+```json
+{
+  "deviceId": "smart_home_001",
+  "irHubDeviceId": "ir_hub_001",
+  "key": "ac_cool_26",
+  "name": "Dieu hoa cool 26",
+  "category": "aircon",
+  "description": "Bat dieu hoa che do cool 26 do",
+  "protocol": "MULTIBRACKETS",
+  "bits": 8,
+  "valueHex": "0xC0",
+  "rawData": [29724, 49406, 3336, 1690, 380],
+  "rawLength": 100,
+  "frequency": 38,
+  "source": "esp32-ir-learn"
+}
+```
+
+5. Verify the response includes `ok: true`, `key: "ac_cool_26"`, and the saved command payload
+6. Then call `GET /api/smart-home/ir-commands/ac_cool_26`
+7. Verify the response returns `found: true` and the stored IR command data

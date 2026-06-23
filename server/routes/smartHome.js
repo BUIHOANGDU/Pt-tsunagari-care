@@ -34,6 +34,22 @@ function getMissingCommandField(body = {}) {
   });
 }
 
+function getIsoTimestamp() {
+  return new Date().toISOString();
+}
+
+function getMissingIrCommandField(body = {}) {
+  if (typeof body.key !== "string" || body.key.trim() === "") {
+    return "key";
+  }
+
+  if (!Array.isArray(body.rawData) || body.rawData.length === 0) {
+    return "rawData";
+  }
+
+  return null;
+}
+
 router.post("/command", deviceAuth, async (req, res) => {
   const {
     source = "chami_001",
@@ -141,6 +157,117 @@ router.post("/commands", deviceAuth, async (req, res) => {
     });
   } catch (error) {
     console.error("Smart home command queue write failed:", error);
+
+    return res.status(500).json({
+      ok: false,
+      error: error.message,
+    });
+  }
+});
+
+router.post("/ir-commands", deviceAuth, async (req, res) => {
+  const missingField = getMissingIrCommandField(req.body || {});
+
+  if (missingField) {
+    return res.status(400).json({
+      ok: false,
+      error: "missing_field",
+      message: `${missingField} is required`,
+    });
+  }
+
+  const {
+    deviceId = "smart_home_001",
+    irHubDeviceId = "",
+    key,
+    name = "",
+    category = "",
+    description = "",
+    protocol = "",
+    bits = 0,
+    valueHex = "",
+    rawData,
+    rawLength,
+    frequency = 38,
+    source = "esp32-ir-learn",
+  } = req.body;
+
+  const commandKey = key.trim();
+  const commandRef = getDb().ref(`irCommands/${commandKey}`);
+
+  try {
+    const existingSnapshot = await commandRef.once("value");
+    const existingCommand = existingSnapshot.exists() ? existingSnapshot.val() : null;
+    const now = getIsoTimestamp();
+    const command = {
+      key: commandKey,
+      name,
+      category,
+      description,
+      protocol,
+      bits,
+      valueHex,
+      rawData,
+      rawLength:
+        typeof rawLength === "number" && rawLength > 0 ? rawLength : rawData.length,
+      frequency,
+      deviceId,
+      irHubDeviceId,
+      source,
+      createdAt: existingCommand?.createdAt || now,
+      updatedAt: now,
+    };
+
+    await commandRef.set(command);
+
+    console.log(
+      `IR command saved: key=${commandKey} deviceId=${deviceId} rawLength=${command.rawLength}`,
+    );
+
+    return res.status(200).json({
+      ok: true,
+      key: commandKey,
+      message: "IR command saved",
+      command,
+    });
+  } catch (error) {
+    console.error("IR command save failed:", error);
+
+    return res.status(500).json({
+      ok: false,
+      error: error.message,
+    });
+  }
+});
+
+router.get("/ir-commands/:key", deviceAuth, async (req, res) => {
+  const commandKey = (req.params.key || "").trim();
+
+  if (!commandKey) {
+    return res.status(400).json({
+      ok: false,
+      error: "missing_field",
+      message: "key is required",
+    });
+  }
+
+  try {
+    const snapshot = await getDb().ref(`irCommands/${commandKey}`).once("value");
+
+    if (!snapshot.exists()) {
+      return res.status(200).json({
+        ok: true,
+        found: false,
+      });
+    }
+
+    return res.status(200).json({
+      ok: true,
+      found: true,
+      command: snapshot.val(),
+    });
+  } catch (error) {
+    console.error("IR command lookup failed:", error);
 
     return res.status(500).json({
       ok: false,
