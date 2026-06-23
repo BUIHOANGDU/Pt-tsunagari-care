@@ -802,8 +802,7 @@ a:focus-visible,
 }
 
 .alerts-compact {
-  max-height: 132px;
-  overflow: hidden;
+  align-content: start;
 }
 
 .commands-compact {

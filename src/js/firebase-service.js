@@ -23,6 +23,8 @@ const FirebaseService = (function () {
     care_logs: null,
     commands: null,
   };
+  const LEGACY_DEMO_MEDICINE_MESSAGE =
+    "\u0110\u00e3 u\u1ed1ng thu\u1ed1c (demo)";
 
   function init() {
     try {
@@ -357,6 +359,33 @@ const FirebaseService = (function () {
     return data;
   }
 
+  async function createRobotActionCommand(target, action, text, options = {}) {
+    const payload = {
+      source: options.source || "dashboard",
+      target,
+      type: "robot_action",
+      action,
+      text: text || "",
+      status: options.status || "pending",
+      createdAt: options.createdAt || realtimeServerTs(),
+    };
+
+    if (useRealtime) {
+      return pushRealtimeValue("commands", payload);
+    }
+
+    const arr = JSON.parse(localStorage.getItem("mock:commands") || "[]");
+    const data = {
+      id: options.id || "cmd_" + Date.now(),
+      ...payload,
+    };
+
+    arr.unshift(data);
+    localStorage.setItem("mock:commands", JSON.stringify(arr));
+    notifyLocal("commands");
+    return data;
+  }
+
   async function createSmartHomeCommand(action) {
     const textByAction = {
       on: "Bật đèn phòng khách",
@@ -370,6 +399,13 @@ const FirebaseService = (function () {
   }
 
   async function createCareLog(log) {
+    const message = typeof log?.message === "string" ? log.message : "";
+
+    if (message.includes(LEGACY_DEMO_MEDICINE_MESSAGE)) {
+      console.warn("FirebaseService: ignored legacy demo medicine care log");
+      return null;
+    }
+
     const payload = {
       userId: log.userId || "user01",
       type: log.type || "unknown",
@@ -683,6 +719,7 @@ const FirebaseService = (function () {
     updateCommandStatus,
     createCommand,
     createDeviceControlCommand,
+    createRobotActionCommand,
     createSmartHomeCommand,
     createCareLog,
     createAlert,

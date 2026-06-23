@@ -4,6 +4,16 @@ FirebaseService.seedMockData && FirebaseService.seedMockData();
 const SMART_HOME_DEVICE_ID = "smart_home_001";
 const LIGHT_DEVICE_ID = "light_001";
 const LEGACY_LIGHT_DEVICE_ID = "light01";
+const CARE_LOG_DISPLAY_LIMIT = 3;
+const ALERT_DISPLAY_LIMIT = 1;
+const PENDING_COMMAND_DISPLAY_LIMIT = 2;
+const RESOLVED_FALL_HISTORY_LIMIT = 3;
+const LEGACY_DEMO_MEDICINE_MESSAGE =
+  "\u0110\u00e3 u\u1ed1ng thu\u1ed1c (demo)";
+const MEDICINE_REMINDER_COMMAND_TEXT =
+  "Nh\u1eafc ng\u01b0\u1eddi d\u00f9ng u\u1ed1ng thu\u1ed1c";
+const MEDICINE_REMINDER_LOG_MESSAGE =
+  "\u0110\u00e3 g\u1eedi l\u1ec7nh nh\u1eafc u\u1ed1ng thu\u1ed1c cho Chami";
 
 function updateRobotSection(robot) {
   // Update overview cards
@@ -264,6 +274,40 @@ function getTimeValue(value) {
   return Number.isNaN(time) ? 0 : time;
 }
 
+function sortByNewest(items, getTimestamp) {
+  return (items || []).slice().sort((a, b) => {
+    const timeA = getTimestamp(a);
+    const timeB = getTimestamp(b);
+    return timeB - timeA;
+  });
+}
+
+function appendCompactMore(container, hiddenCount, label) {
+  if (!container || hiddenCount <= 0) return;
+
+  const more = document.createElement("div");
+  more.className = "compact-more";
+  more.textContent = `+ ${hiddenCount} ${label}`;
+  container.appendChild(more);
+}
+
+function isLegacyDemoMedicineLog(log) {
+  const message = typeof log?.message === "string" ? log.message : "";
+  return message.includes(LEGACY_DEMO_MEDICINE_MESSAGE);
+}
+
+function getRealtimeCommandTimestamp() {
+  if (
+    typeof FirebaseService?.useRealtime === "function" &&
+    FirebaseService.useRealtime() &&
+    window.firebase?.database?.ServerValue?.TIMESTAMP
+  ) {
+    return window.firebase.database.ServerValue.TIMESTAMP;
+  }
+
+  return undefined;
+}
+
 function formatDateTime(value) {
   if (!value) return "Không rõ thời gian";
 
@@ -456,8 +500,11 @@ function renderFallAlerts(alerts) {
 
   const data = alerts || [];
   const activeAlerts = data.filter((alert) => canResolveFallAlert(alert.status));
-  const allResolvedAlerts = data.filter((alert) => alert.status === "resolved");
-  const resolvedAlerts = allResolvedAlerts.slice(0, 3);
+  const allResolvedAlerts = sortByNewest(
+    data.filter((alert) => alert.status === "resolved"),
+    (alert) => getTimeValue(alert.resolvedAt || alert.updatedAt || alert.createdAt),
+  );
+  const resolvedAlerts = allResolvedAlerts.slice(0, RESOLVED_FALL_HISTORY_LIMIT);
   const hiddenResolvedCount = Math.max(
     allResolvedAlerts.length - resolvedAlerts.length,
     0,
@@ -471,13 +518,7 @@ function renderFallAlerts(alerts) {
     resolvedAlerts,
     "No resolved fall alerts yet",
   );
-
-  if (hiddenResolvedCount > 0) {
-    const more = document.createElement("div");
-    more.className = "compact-more";
-    more.textContent = `+ ${hiddenResolvedCount} more resolved alerts`;
-    resolvedList.appendChild(more);
-  }
+  appendCompactMore(resolvedList, hiddenResolvedCount, "mục cũ hơn");
 }
 
 function setupResolvedFallHistoryToggle() {
@@ -693,16 +734,23 @@ renderAlerts = function (alerts) {
     return;
   }
 
-  const priorityAlerts = data.filter(
-    (alert) =>
-      alert.status === "new" ||
-      alert.level === "danger" ||
-      alert.source === "chami_001",
-  );
-  const selectedAlerts = (priorityAlerts.length > 0 ? priorityAlerts : data)
+  const isNewAlert = (alert) => alert?.status === "new";
+  const isDangerOrSosAlert = (alert) =>
+    alert?.level === "danger" || alert?.type === "sos";
+
+  const selectedAlerts = data
     .slice()
-    .sort((a, b) => getTimeValue(b.createdAt) - getTimeValue(a.createdAt))
-    .slice(0, 1);
+    .sort((a, b) => {
+      const newDiff = Number(isNewAlert(b)) - Number(isNewAlert(a));
+      if (newDiff !== 0) return newDiff;
+
+      const dangerOrSosDiff =
+        Number(isDangerOrSosAlert(b)) - Number(isDangerOrSosAlert(a));
+      if (dangerOrSosDiff !== 0) return dangerOrSosDiff;
+
+      return getTimeValue(b.createdAt) - getTimeValue(a.createdAt);
+    })
+    .slice(0, ALERT_DISPLAY_LIMIT);
   const hiddenCount = Math.max(data.length - selectedAlerts.length, 0);
 
   selectedAlerts.forEach((a) => {
@@ -729,23 +777,26 @@ renderAlerts = function (alerts) {
     el.appendChild(row);
   });
 
-  if (hiddenCount > 0) {
-    const more = document.createElement("div");
-    more.className = "compact-more";
-    more.textContent = `+ ${hiddenCount} other alerts`;
-    el.appendChild(more);
-  }
+  appendCompactMore(el, hiddenCount, "cảnh báo khác");
 };
 
 function renderCareLogs(logs) {
   const el = document.getElementById("care-logs");
   el.innerHTML = "";
-  if (!logs || logs.length === 0) {
+  const validLogs = sortByNewest(
+    (logs || []).filter((log) => !isLegacyDemoMedicineLog(log)),
+    (log) => getTimeValue(log.createdAt),
+  );
+  const visibleLogs = validLogs.slice(0, CARE_LOG_DISPLAY_LIMIT);
+  const hiddenCount = Math.max(validLogs.length - visibleLogs.length, 0);
+
+  if (visibleLogs.length === 0) {
     el.innerHTML =
-      '<div style="padding: 12px; color: #6b7280; text-align: center; font-size: 0.9rem;">No logs</div>';
+      '<div style="padding: 12px; color: #6b7280; text-align: center; font-size: 0.9rem;">Chưa có hoạt động mới</div>';
     return;
   }
-  logs.slice(0, 6).forEach((l) => {
+
+  visibleLogs.forEach((l) => {
     const item = document.createElement("div");
     item.className = "care-item";
     item.innerHTML = `
@@ -757,21 +808,74 @@ function renderCareLogs(logs) {
     `;
     el.appendChild(item);
   });
+
+  appendCompactMore(el, hiddenCount, "hoạt động cũ hơn");
+}
+
+async function handleMedicineReminderButtonClick() {
+  console.log("Medicine button clicked - creating Chami command");
+
+  try {
+    if (typeof FirebaseService.createRobotActionCommand !== "function") {
+      throw new Error("FirebaseService.createRobotActionCommand is unavailable");
+    }
+
+    const commandOptions = {
+      source: "dashboard",
+      status: "pending",
+    };
+    const realtimeTimestamp = getRealtimeCommandTimestamp();
+
+    if (typeof realtimeTimestamp !== "undefined") {
+      commandOptions.createdAt = realtimeTimestamp;
+    }
+
+    const command = await FirebaseService.createRobotActionCommand(
+      "chami_001",
+      "remind_medicine",
+      MEDICINE_REMINDER_COMMAND_TEXT,
+      commandOptions,
+    );
+
+    console.log("Chami medicine reminder command created", {
+      id: command?.id || null,
+      target: command?.target || "chami_001",
+      type: command?.type || "robot_action",
+      action: command?.action || "remind_medicine",
+      status: command?.status || "pending",
+    });
+
+    await FirebaseService.createCareLog({
+      userId: "user01",
+      type: "medicine",
+      status: "sent",
+      message: MEDICINE_REMINDER_LOG_MESSAGE,
+      source: "dashboard",
+    });
+  } catch (error) {
+    console.error("Failed to create Chami medicine reminder command", error);
+  }
+}
+
+function bindMedicineReminderButtonHandler() {
+  const button = document.getElementById("demo-medicine-done");
+  if (!button) return;
+
+  button.onclick = handleMedicineReminderButtonClick;
 }
 
 // Commands UI
 function getCommandTitle(command) {
-  return (
-    command?.command ||
-    command?.type ||
-    command?.action ||
-    "unknown"
-  );
+  return command?.command || command?.type || command?.action || "unknown";
 }
 
 function getCommandDetail(command) {
   if (command?.device && command?.action) {
     return `${command.device} / ${command.action}`;
+  }
+
+  if (command?.target && command?.action) {
+    return `${command.target} / ${command.action}`;
   }
 
   return (
@@ -786,11 +890,11 @@ function getCommandDetail(command) {
 function renderCommands(cmds) {
   const el = document.getElementById("commands-list");
   el.innerHTML = "";
-  const pendingCommands = (cmds || [])
-    .filter((command) => (command.status || "pending") === "pending")
-    .slice()
-    .sort((a, b) => getTimeValue(b.createdAt) - getTimeValue(a.createdAt));
-  const visibleCommands = pendingCommands.slice(0, 2);
+  const pendingCommands = sortByNewest(
+    (cmds || []).filter((command) => (command.status || "pending") === "pending"),
+    (command) => getTimeValue(command.createdAt),
+  );
+  const visibleCommands = pendingCommands.slice(0, PENDING_COMMAND_DISPLAY_LIMIT);
   const hiddenCount = Math.max(pendingCommands.length - visibleCommands.length, 0);
 
   if (visibleCommands.length === 0) {
@@ -818,12 +922,7 @@ function renderCommands(cmds) {
     el.appendChild(row);
   });
 
-  if (hiddenCount > 0) {
-    const more = document.createElement("div");
-    more.className = "compact-more";
-    more.textContent = `+ ${hiddenCount} other pending commands`;
-    el.appendChild(more);
-  }
+  appendCompactMore(el, hiddenCount, "lệnh chờ khác");
 }
 
 document
@@ -915,14 +1014,39 @@ document.getElementById("demo-fall").onclick = async () => {
   });
 };
 document.getElementById("demo-medicine-done").onclick = async () => {
-  await FirebaseService.createCareLog({
-    userId: "user01",
-    type: "medicine",
-    status: "done",
-    message: "Đã uống thuốc (demo)",
-    source: "demo",
-  });
+  return handleMedicineReminderButtonClick();
+
+  try {
+    const command = await FirebaseService.createRobotActionCommand(
+      "chami_001",
+      "remind_medicine",
+      "Nhắc người dùng uống thuốc",
+      {
+        source: "dashboard",
+      },
+    );
+
+    console.log("Chami medicine reminder command created", {
+      id: command?.id || null,
+      target: command?.target || "chami_001",
+      action: command?.action || "remind_medicine",
+      status: command?.status || "pending",
+    });
+
+    await FirebaseService.createCareLog({
+      userId: "user01",
+      type: "medicine",
+      status: "sent",
+      message: "Đã gửi lệnh nhắc uống thuốc cho Chami",
+      source: "dashboard",
+    });
+  } catch (error) {
+    console.error("Failed to create Chami medicine reminder command", error);
+  }
 };
+bindMedicineReminderButtonHandler();
+setTimeout(bindMedicineReminderButtonHandler, 0);
+window.addEventListener("load", bindMedicineReminderButtonHandler);
 document.getElementById("demo-no-response").onclick = async () => {
   await FirebaseService.createCareLog({
     userId: "user01",

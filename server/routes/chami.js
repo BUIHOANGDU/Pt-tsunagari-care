@@ -150,7 +150,7 @@ router.get("/commands/next", deviceAuth, async (req, res) => {
 
 router.post("/commands/:commandId/done", deviceAuth, async (req, res) => {
   const { commandId } = req.params;
-  const { deviceId, result, message } = req.body || {};
+  const { deviceId } = req.body || {};
 
   if (!deviceId) {
     return res.status(400).json({
@@ -179,20 +179,15 @@ router.post("/commands/:commandId/done", deviceAuth, async (req, res) => {
       });
     }
 
-    await commandRef.update({
-      status: "done",
-      doneAt: getServerTimestamp(),
-      result: result || "done",
-      resultMessage: message || "",
-    });
+    await commandRef.remove();
 
     return res.json({
       ok: true,
       commandId,
-      message: "Command marked as done",
+      message: "Command processed and removed",
     });
   } catch (error) {
-    console.error("Chami command completion failed:", error);
+    console.error("Chami command removal failed:", error);
 
     return res.status(500).json({
       ok: false,
