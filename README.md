@@ -1,46 +1,46 @@
 # TsunagariCare
 
-TsunagariCare — つながりケア: AIロボットとIoTを用いた在宅見守り支援システムの開発
+TsunagariCare is a web dashboard and bridge API demo for an AI robot + IoT care scenario.
 
-Mục tiêu: Web Dashboard + Firestore schema + Demo mode để phục vụ bảo vệ đồ án.
+Quick start:
 
-Xem nhanh:
+- Open [index.html](index.html) in a browser, or serve the project locally.
+- Firebase config is optional. Without it, the dashboard runs in local demo mode.
 
-- Mở [index.html](index.html) trong trình duyệt (hoặc dùng `python -m http.server`).
-- Cấu hình Firebase (tuỳ chọn): sao chép `src/js/firebase-config.js.example` → `src/js/firebase-config.js` và điền cấu hình.
-
-Thư mục chính:
+Main folders:
 
 - [index.html](index.html)
-- [src/](src/) — mã nguồn front-end
-- [docs/](docs/) — tài liệu kiến trúc và schema
+- [src/](src/) - frontend source
+- [server/](server/) - Express bridge API
+- [docs/](docs/) - architecture and schema notes
 
-Chạy local nhanh:
+Run locally:
 
 ```bash
 cd tsunagari-care
-# phục vụ static trên cổng 8000
+
+# serve the static dashboard on port 8000
 python -m http.server 8000
 
-# rồi mở http://localhost:8000
+# run the bridge API
+node server/index.js
 ```
 
-Nếu không cấu hình Firebase, giao diện dùng chế độ fallback demo (localStorage).
-Important: Mock-first approach
+Then open `http://localhost:8000`.
 
-- The Web Dashboard is mock-first: it runs fully with localStorage demo data and does not require a real Robot or ESP32.
-- `Robot AI Module` and `Smart Home Module` are being developed separately; this dashboard provides Firestore schema and a command system so those modules can connect later.
-- Commands created by the dashboard are stored in the `commands` collection (or `mock:commands` in localStorage) with `status: pending`.
-- Fall Detection Camera uses MediaPipe Pose in the browser. Video is processed locally and not uploaded. Only detection metadata is stored in Firestore.
+Important notes:
 
-Firebase integration (quick guide):
+- The dashboard is mock-first and can run without a real robot or ESP32.
+- Commands created by the dashboard are stored in the Realtime Database / Firestore-backed command queue with `status: pending`.
+- Fall detection demo runs in the browser and only stores detection metadata.
 
-1. In Firebase Console create a project and enable Firestore (Native mode).
+Firebase integration:
+
+1. In Firebase Console, create a project and enable Firestore or Realtime Database as needed.
 2. Create a Web App and copy the config object.
-3. Create file `src/js/firebase-config.js` containing:
+3. Create `src/js/firebase-config.js`:
 
 ```js
-// src/js/firebase-config.js
 const firebaseConfig = {
   apiKey: "YOUR_API_KEY",
   authDomain: "your-project.firebaseapp.com",
@@ -51,16 +51,22 @@ const firebaseConfig = {
 };
 ```
 
-4. Add Firebase SDK script tags in `index.html` before `src/js/firebase-service.js`:
+4. Add Firebase SDK script tags in `index.html` before `src/js/firebase-service.js`.
+5. Reload the page.
 
-```html
-<script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
-<script src="src/js/firebase-config.js"></script>
-```
+Security note:
 
-5. Reload the page — the dashboard will use Firestore realtime listeners. If not present, it will stay in local demo mode.
+- Never commit `src/js/firebase-config.js` with real keys.
+- Use `src/js/firebase-config.js.example` as the template.
 
-Security note: Never commit `src/js/firebase-config.js` with real keys to git. Use `src/js/firebase-config.js.example` as template.
+Render keep-alive:
 
-Commit history: commit đầu sẽ là: "chore: init TsunagariCare project structure and basic dashboard"
+1. In your GitHub repository, go to `Settings > Secrets and variables > Actions`.
+2. Add a secret named `RENDER_HEALTH_URL`.
+3. Example value: `https://your-app.onrender.com/health`
+4. The workflow [`.github/workflows/keep-alive.yml`](.github/workflows/keep-alive.yml) calls this URL every 5 minutes using `curl -fsS`.
+
+Note:
+
+- This keep-alive setup is intended for demo/dev usage.
+- For production, prefer a paid Render instance or a more suitable platform such as Firebase Hosting or Cloud Functions.

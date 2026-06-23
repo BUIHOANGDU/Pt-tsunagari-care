@@ -1,0 +1,17 @@
+name: Keep Render Server Alive
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping-health:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Render health endpoint
+        env:
+          RENDER_HEALTH_URL: ${{ secrets.RENDER_HEALTH_URL }}
+        run: |
+          test -n "$RENDER_HEALTH_URL"
+          curl -fsS "$RENDER_HEALTH_URL"
