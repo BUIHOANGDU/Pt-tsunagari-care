@@ -2,12 +2,19 @@
 FirebaseService.seedMockData && FirebaseService.seedMockData();
 
 const SMART_HOME_DEVICE_ID = "smart_home_001";
+const IR_HUB_DEVICE_ID = "ir_hub_001";
 const LIGHT_DEVICE_ID = "light_001";
 const LEGACY_LIGHT_DEVICE_ID = "light01";
+const AIRCON_DEVICE_ID = "ac01";
+const DEFAULT_TSUNAGARI_BRIDGE_API_URL =
+  "https://pt-tsunagari-care.onrender.com";
+const DEFAULT_TSUNAGARI_DEVICE_TOKEN = "DEV_TOKEN";
 const CARE_LOG_DISPLAY_LIMIT = 3;
 const ALERT_DISPLAY_LIMIT = 1;
 const PENDING_COMMAND_DISPLAY_LIMIT = 2;
 const RESOLVED_FALL_HISTORY_LIMIT = 3;
+const ROBOT_OFFLINE_TIMEOUT_MS = 90 * 1000;
+const ROBOT_STATUS_REFRESH_INTERVAL_MS = 10 * 1000;
 const LEGACY_DEMO_MEDICINE_MESSAGE =
   "\u0110\u00e3 u\u1ed1ng thu\u1ed1c (demo)";
 const MEDICINE_REMINDER_COMMAND_TEXT =
@@ -40,6 +47,7 @@ function updateDevicesSection(devices) {
 
 let latestBridgeRobot = null;
 let latestLegacyRobot = null;
+let latestSmartHomeDevices = [];
 
 function isBridgeChamiDevice(device) {
   return device?.id === "chami_001" || device?.type === "ai_robot";
@@ -56,6 +64,11 @@ function isLightDevice(device) {
     id === LEGACY_LIGHT_DEVICE_ID ||
     device?.type === "light"
   );
+}
+
+function isAirconDevice(device) {
+  const id = getDeviceId(device);
+  return id === AIRCON_DEVICE_ID || device?.type === "ac";
 }
 
 function getSmartHomeDevicesForDisplay(devices) {
@@ -75,6 +88,32 @@ function getSmartHomeDevicesForDisplay(devices) {
   );
 }
 
+function getLightDisplayName() {
+  return "Đèn phòng khách";
+}
+
+function getLightStatusText(status) {
+  return status === "on" ? "Đèn đang bật" : "Đèn đang tắt";
+}
+
+function toggleLocalLightDisplayState() {
+  latestSmartHomeDevices = latestSmartHomeDevices.map((device) => {
+    if (!isLightDevice(device)) {
+      return device;
+    }
+
+    const nextStatus = device?.status === "on" ? "off" : "on";
+    return {
+      ...device,
+      name: getLightDisplayName(),
+      status: nextStatus,
+      updatedAt: new Date().toISOString(),
+    };
+  });
+
+  renderDevices(latestSmartHomeDevices);
+}
+
 function getLightCommandText(action) {
   const textByAction = {
     on: "Bật đèn phòng khách",
@@ -85,28 +124,105 @@ function getLightCommandText(action) {
   return textByAction[action] || "Điều khiển đèn phòng khách";
 }
 
-async function createLightControlCommand(action) {
-  if (typeof FirebaseService.createDeviceControlCommand === "function") {
-    return FirebaseService.createDeviceControlCommand(LIGHT_DEVICE_ID, action, {
-      source: "dashboard",
-      target: SMART_HOME_DEVICE_ID,
-      text: getLightCommandText(action),
-    });
+function getBridgeApiBaseUrl() {
+  const configuredBaseUrl =
+    window.TSUNAGARI_BRIDGE_API_URL ||
+    localStorage.getItem("tsunagari_bridge_api_url") ||
+    "";
+
+  if (configuredBaseUrl) {
+    return configuredBaseUrl.replace(/\/+$/, "");
   }
 
-  return FirebaseService.createCommand({
-    source: "dashboard",
-    target: SMART_HOME_DEVICE_ID,
-    type: "device_control",
-    device: LIGHT_DEVICE_ID,
-    action,
-    text: getLightCommandText(action),
-    status: "pending",
+  return DEFAULT_TSUNAGARI_BRIDGE_API_URL;
+}
+
+function getBridgeDeviceToken() {
+  return (
+    window.TSUNAGARI_DEVICE_TOKEN ||
+    localStorage.getItem("tsunagari_device_token") ||
+    DEFAULT_TSUNAGARI_DEVICE_TOKEN
+  );
+}
+
+async function createBackendSmartHomeCommand(command) {
+  const headers = {
+    "Content-Type": "application/json",
+  };
+  const deviceToken = getBridgeDeviceToken();
+  const baseUrl = getBridgeApiBaseUrl();
+  const requestUrl = `${baseUrl}/api/smart-home/commands`;
+
+  if (deviceToken) {
+    headers["x-device-token"] = deviceToken;
+  }
+
+  console.log("Smart Home backend URL:", requestUrl);
+  console.log("Smart Home auth header attached:", Boolean(deviceToken));
+
+  const response = await fetch(requestUrl, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(command),
   });
+  const payload = await response
+    .json()
+    .catch(() => ({ ok: false, error: "invalid_json_response" }));
+
+  if (!response.ok || payload?.ok !== true) {
+    throw new Error(
+      payload?.message || payload?.error || `HTTP ${response.status}`,
+    );
+  }
+
+  return payload;
+}
+
+async function sendIRCommand(key) {
+  const command = {
+    targetDeviceId: SMART_HOME_DEVICE_ID,
+    source: "dashboard",
+    type: "ir_send",
+    device: IR_HUB_DEVICE_ID,
+    action: "send",
+    key,
+    status: "pending",
+  };
+  const payload = await createBackendSmartHomeCommand(command);
+
+  console.log("Đã gửi lệnh tới IR Hub", {
+    commandId: payload?.commandId || null,
+    targetDeviceId: command.targetDeviceId,
+    type: command.type,
+    device: command.device,
+    action: command.action,
+    key: command.key,
+    status: command.status,
+  });
+
+  return payload;
+}
+
+async function createLightControlCommand() {
+  return sendIRCommand("room_light_power");
+}
+
+async function createAirconControlCommand(action) {
+  return sendIRCommand(action === "off" ? "ac_off" : "ac_cool_26");
 }
 
 function pickRobotForDisplay() {
   return latestBridgeRobot || latestLegacyRobot;
+}
+
+function getRobotHeartbeatTimestamp(robot) {
+  if (!robot) return 0;
+
+  if (isBridgeChamiDevice(robot)) {
+    return getTimeValue(robot.lastSeen || robot.updatedAt);
+  }
+
+  return getTimeValue(robot.lastSeen || robot.updatedAt || robot.lastActive);
 }
 
 function normalizeRobotForDisplay(robot) {
@@ -120,14 +236,23 @@ function normalizeRobotForDisplay(robot) {
     };
   }
 
+  const heartbeatTimestamp = getRobotHeartbeatTimestamp(robot);
+  const hasRecentHeartbeat =
+    heartbeatTimestamp > 0 &&
+    Date.now() - heartbeatTimestamp <= ROBOT_OFFLINE_TIMEOUT_MS;
   const hasOnlineFlag = typeof robot.online === "boolean";
-  const isOnline = hasOnlineFlag ? robot.online : robot.status === "online";
+  const reportedOnline = hasOnlineFlag
+    ? robot.online
+    : robot.status === "online";
+  const isOnline = reportedOnline && hasRecentHeartbeat;
   const state = robot.state || robot.status || (isOnline ? "online" : "offline");
   const emotion = robot.emotion || "";
-  const detailParts = [isOnline ? "online" : "offline", state, emotion].filter(
-    Boolean,
-  );
-  const lastSeen = robot.lastSeen || robot.updatedAt || robot.lastActive;
+  const lastSeen = isBridgeChamiDevice(robot)
+    ? robot.lastSeen || robot.updatedAt
+    : robot.lastSeen || robot.updatedAt || robot.lastActive;
+  const detailParts = isOnline
+    ? [isOnline ? "online" : "offline", state, emotion].filter(Boolean)
+    : [isBridgeChamiDevice(robot) ? "offline" : state || "offline", "mất kết nối"];
 
   return {
     online: isOnline,
@@ -163,13 +288,22 @@ updateDevicesSection = function (devices) {
   const smartHomeDevices = getSmartHomeDevicesForDisplay(data);
   const bridgeRobot = data.find((device) => device?.id === "chami_001");
 
+  latestSmartHomeDevices = smartHomeDevices.map((device) =>
+    isLightDevice(device)
+      ? { ...device, name: getLightDisplayName() }
+      : device,
+  );
   latestBridgeRobot = bridgeRobot || null;
   updateRobotSection(pickRobotForDisplay());
 
   document.getElementById("devices-count").textContent =
-    smartHomeDevices.length || 0;
-  renderDevices(smartHomeDevices);
+    latestSmartHomeDevices.length || 0;
+  renderDevices(latestSmartHomeDevices);
 };
+
+function refreshRobotPresenceDisplay() {
+  updateRobotSection(pickRobotForDisplay());
+}
 
 function updateAlertsSection(alerts) {
   document.getElementById("alerts-count").textContent = alerts.length || 0;
@@ -188,6 +322,7 @@ function renderDevices(devices) {
     const item = document.createElement("div");
     item.className = "device-item";
     const isLight = isLightDevice(d);
+    const isAircon = isAirconDevice(d);
     const deviceDetail = isLight
       ? d.status === "on"
         ? "Đèn đang bật"
@@ -230,6 +365,78 @@ function renderDevices(devices) {
     wrap.appendChild(item);
   });
 }
+
+renderDevices = function (devices) {
+  const wrap = document.getElementById("devices-list");
+  wrap.innerHTML = "";
+  devices.forEach((d) => {
+    const item = document.createElement("div");
+    item.className = "device-item";
+    const isLight = isLightDevice(d);
+    const isAircon = isAirconDevice(d);
+    const deviceName = isLight ? getLightDisplayName() : d.name;
+    const deviceDetail = isLight
+      ? getLightStatusText(d.status)
+      : isAircon
+        ? d.status === "on"
+          ? "Điều hòa đang bật"
+          : "Điều hòa đang tắt"
+        : d.room || "";
+    const leftDiv = document.createElement("div");
+    leftDiv.className = "left";
+    leftDiv.innerHTML = `<strong>${deviceName}</strong><small>${deviceDetail}</small>`;
+
+    const btn = document.createElement("button");
+    btn.className = "device-toggle";
+    btn.dataset.id = d.id || d.deviceId || "";
+    btn.textContent = isLight
+      ? "Bật / Tắt đèn"
+      : isAircon
+        ? d.status === "on"
+          ? "Tắt điều hòa"
+          : "Bật điều hòa"
+        : (d.status === "on" ? "✓ " : "") + "Toggle";
+    btn.onclick = async () => {
+      const id = btn.dataset.id;
+      btn.disabled = true;
+
+      try {
+        if (isLight) {
+          await createLightControlCommand();
+          toggleLocalLightDisplayState();
+          alert("Đã gửi lệnh tới IR Hub");
+          return;
+        }
+
+        if (isAircon) {
+          const action = d.status === "on" ? "off" : "on";
+          await createAirconControlCommand(action);
+          alert("Đã gửi lệnh tới IR Hub");
+          return;
+        }
+
+        await FirebaseService.createCommand({
+          targetType: "device",
+          targetId: id,
+          command: "toggle",
+          status: "pending",
+          source: "web_dashboard",
+        });
+        alert("Command created (demo)");
+      } catch (error) {
+        console.error("Không gửi được lệnh", error);
+        alert("Không gửi được lệnh");
+      } finally {
+        btn.disabled = false;
+      }
+    };
+
+    item.appendChild(leftDiv);
+    item.appendChild(btn);
+    wrap.appendChild(item);
+  });
+};
+
 function getAlertTypeLabel(type) {
   const labels = {
     fall_detected: "Phát hiện ngã",
@@ -1057,7 +1264,22 @@ document.getElementById("demo-no-response").onclick = async () => {
   });
 };
 document.getElementById("demo-toggle-light").onclick = async () => {
-  await createLightControlCommand("toggle");
+  const button = document.getElementById("demo-toggle-light");
+  if (button) {
+    button.disabled = true;
+  }
+  try {
+    await createLightControlCommand();
+    toggleLocalLightDisplayState();
+    alert("Đã gửi lệnh tới IR Hub");
+  } catch (error) {
+    console.error("Không gửi được lệnh", error);
+    alert("Không gửi được lệnh");
+  } finally {
+    if (button) {
+      button.disabled = false;
+    }
+  }
 };
 
 // subscribe to realtime updates (works with Firestore or local fallback)
@@ -1090,6 +1312,8 @@ if (typeof FirebaseService.subscribeToCommands === "function") {
   FirebaseService.subscribeToCommands((data) => renderCommands(data || []));
 }
 
+setInterval(refreshRobotPresenceDisplay, ROBOT_STATUS_REFRESH_INTERVAL_MS);
+
 setupResolvedFallHistoryToggle();
 subscribeToCameraDeviceStatus();
 subscribeToFallAlerts();
@@ -1106,3 +1330,4 @@ subscribeToFallAlerts();
   const logs = await FirebaseService.listCareLogs();
   updateCareLogsSection(logs || []);
 })();
+
