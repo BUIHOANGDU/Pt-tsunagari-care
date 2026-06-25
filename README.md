@@ -124,3 +124,57 @@ Thunder Client test for IR command storage:
 5. Verify the response includes `ok: true`, `key: "ac_cool_26"`, and the saved command payload
 6. Then call `GET /api/smart-home/ir-commands/ac_cool_26`
 7. Verify the response returns `found: true` and the stored IR command data
+
+Thunder Client test for Robot Voice Command:
+
+1. Send `POST https://pt-tsunagari-care.onrender.com/api/robot/voice-command`
+2. Add headers:
+
+```txt
+Content-Type: application/json
+x-device-token: DEV_TOKEN
+```
+
+3. Test light command:
+
+```json
+{
+  "deviceId": "chami_001",
+  "text": "Chami bật đèn phòng khách"
+}
+```
+
+4. Test aircon cool 26 command:
+
+```json
+{
+  "deviceId": "chami_001",
+  "text": "Chami bật điều hòa 26 độ"
+}
+```
+
+5. Test aircon off command:
+
+```json
+{
+  "deviceId": "chami_001",
+  "text": "Chami tắt điều hòa"
+}
+```
+
+6. Expected backend response:
+
+- `ok: true`
+- `commandId` is present
+- `intent` maps to one of:
+  - `smart_home_light_toggle`
+  - `smart_home_ac_cool_26`
+  - `smart_home_ac_off`
+
+7. The backend stores the generated IR command in the existing Realtime Database queue at `commands/{pushId}`.
+8. Then the ESP32 Smart Home Bridge should log:
+
+- `IR send command received`
+- `IR send key: room_light_power` or `ac_cool_26` or `ac_off`
+- `IR command sent`
+- `result=ir_sent`

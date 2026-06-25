@@ -2,6 +2,7 @@ const express = require("express");
 
 const deviceAuth = require("../middleware/deviceAuth");
 const { getDb, getServerTimestamp } = require("../firebaseAdmin");
+const { createSmartHomeCommand, getMissingCommandField } = require("../lib/smartHomeCommands");
 
 const router = express.Router();
 
@@ -18,20 +19,6 @@ function getCommandTimestamp(command) {
 
   const parsed = Date.parse(raw);
   return Number.isNaN(parsed) ? 0 : parsed;
-}
-
-function getMissingCommandField(body = {}) {
-  const requiredFields = [
-    "targetDeviceId",
-    "type",
-    "device",
-    "action",
-  ];
-
-  return requiredFields.find((field) => {
-    const value = body[field];
-    return typeof value !== "string" || value.trim() === "";
-  });
 }
 
 function getIsoTimestamp() {
@@ -114,45 +101,23 @@ router.post("/commands", deviceAuth, async (req, res) => {
     });
   }
 
-  const {
-    targetDeviceId,
-    source = "dashboard",
-    type,
-    device,
-    action,
-    key = "",
-    name = "",
-    category = "",
-    description = "",
-    status = "pending",
-  } = req.body;
-
-  const commandRef = getDb().ref("commands").push();
-  const now = new Date().toISOString();
-  const command = {
-    id: commandRef.key,
-    commandId: commandRef.key,
-    targetDeviceId,
-    target: targetDeviceId,
-    source,
-    type,
-    device,
-    action,
-    key,
-    name,
-    category,
-    description,
-    status: status || "pending",
-    createdAt: now,
-    updatedAt: now,
-  };
-
   try {
-    await commandRef.set(command);
+    const { commandId, command } = await createSmartHomeCommand({
+      targetDeviceId: req.body.targetDeviceId,
+      source: req.body.source || "dashboard",
+      type: req.body.type,
+      device: req.body.device,
+      action: req.body.action,
+      key: req.body.key || "",
+      name: req.body.name || "",
+      category: req.body.category || "",
+      description: req.body.description || "",
+      status: req.body.status || "pending",
+    });
 
     return res.status(200).json({
       ok: true,
-      commandId: commandRef.key,
+      commandId,
       command,
     });
   } catch (error) {
