@@ -1,0 +1,10 @@
+/.env
+node_modules/
+dist/
+*.log
+
+# Firebase real config - do not commit
+src/js/firebase-config.js
+*.serviceAccount.json
+serviceAccountKey.json
+firebase-adminsdk*.json

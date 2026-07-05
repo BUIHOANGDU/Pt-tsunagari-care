@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>TsunagariCare | Fall Detection Camera MVP</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="fall-camera.css" />
+  </head>
+  <body>
+    <main class="camera-page">
+      <header class="camera-header">
+        <a class="brand-link" href="index.html" aria-label="Back to dashboard">
+          <span class="brand-icon" aria-hidden="true">TC</span>
+          <span>
+            <strong>TsunagariCare</strong>
+            <small>Fall Detection Camera MVP</small>
+          </span>
+        </a>
+        <span id="camera-status-pill" class="status-pill offline">Offline</span>
+      </header>
+
+      <section class="camera-layout" aria-labelledby="page-title">
+        <div class="camera-stage">
+          <div class="camera-stage-header">
+            <div>
+              <p class="kicker">Webcam preview</p>
+              <h1 id="page-title">Fall Detection Camera</h1>
+            </div>
+            <div class="camera-meta">
+              <span>Camera ID: <strong>default_cam</strong></span>
+              <span>Location: <strong>living_room</strong></span>
+            </div>
+          </div>
+
+          <div class="video-shell">
+            <video
+              id="camera-video"
+              autoplay
+              playsinline
+              muted
+              aria-label="Webcam video"
+            ></video>
+            <canvas id="camera-overlay" aria-hidden="true"></canvas>
+            <div id="empty-camera-state" class="empty-camera-state">
+              Camera is offline
+            </div>
+          </div>
+
+          <div class="camera-controls" aria-label="Camera controls">
+            <button id="start-camera" class="primary" type="button">
+              Start Camera
+            </button>
+            <button id="stop-camera" type="button">Stop Camera</button>
+            <button id="test-fall-alert" class="danger" type="button">
+              Test Fall Alert
+            </button>
+            <button id="clear-log" class="secondary" type="button">
+              Clear Local Log
+            </button>
+          </div>
+          <p
+            id="fall-command-status"
+            class="camera-inline-status"
+            aria-live="polite"
+          ></p>
+          <p class="privacy-note">
+            映像は保存されず、検知結果のみFirebaseに送信されます。
+          </p>
+        </div>
+
+        <aside class="status-panel" aria-label="Camera detection status">
+          <section>
+            <p class="kicker">Camera</p>
+            <dl class="status-grid">
+              <div>
+                <dt>Camera status</dt>
+                <dd id="camera-status">Offline</dd>
+              </div>
+              <div>
+                <dt>Person status</dt>
+                <dd id="person-status">No person</dd>
+              </div>
+              <div>
+                <dt>Posture status</dt>
+                <dd id="posture-status">Unknown</dd>
+              </div>
+              <div>
+                <dt>Fall status</dt>
+                <dd id="fall-status">Normal</dd>
+              </div>
+              <div>
+                <dt>Camera ID</dt>
+                <dd>default_cam</dd>
+              </div>
+              <div>
+                <dt>Location</dt>
+                <dd>living_room</dd>
+              </div>
+            </dl>
+          </section>
+
+          <section class="log-section" aria-labelledby="log-title">
+            <div class="log-heading">
+              <p class="kicker">Local log</p>
+              <h2 id="log-title">Events</h2>
+            </div>
+            <ul id="local-log" class="local-log" aria-live="polite"></ul>
+          </section>
+        </aside>
+      </section>
+    </main>
+
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
+    <script src="src/js/firebase-config.js"></script>
+    <script src="src/js/firebase-service.js"></script>
+    <script src="fall-camera.js"></script>
+  </body>
+</html>
