@@ -7,6 +7,7 @@
   const CONFIRMED_FALL_MS = 8000;
   const FALL_ALERT_COOLDOWN_MS = 30000;
   const FALL_EMERGENCY_COOLDOWN_MS = 30000;
+  const FALL_RESET_GRACE_MS = 1500;
   const MIN_FALL_CONFIDENCE = 0.7;
   const MIN_VALID_LANDMARKS = 12;
   const MIN_LANDMARK_VISIBILITY = 0.5;
@@ -72,6 +73,8 @@
   let mediaPipeRuntimeErrorLogged = false;
   let lastFallEmergencyCommandAt = 0;
   let fallEmergencyCommandPending = false;
+  let currentFallEventConfirmed = false;
+  let fallExitStartedAt = null;
 
   function getFirebaseConfig() {
     if (window.firebaseConfig) return window.firebaseConfig;
@@ -350,6 +353,38 @@
     }
   }
 
+  function markCurrentFallAlertConfirmedIfNeeded() {
+    if (
+      !currentFallAlertId ||
+      confirmedUpdateSent ||
+      confirmedUpdatePending ||
+      !currentFallEventConfirmed
+    ) {
+      return;
+    }
+
+    confirmedUpdateSent = true;
+    confirmedUpdatePending = true;
+    addLog(`Fall event confirmed: ${currentFallAlertId}`);
+
+    updateFallAlertConfirmed(currentFallAlertId).finally(() => {
+      confirmedUpdatePending = false;
+    });
+  }
+
+  function confirmFallFromCamera() {
+    if (currentFallEventConfirmed) {
+      return;
+    }
+
+    currentFallEventConfirmed = true;
+    fallStatus.textContent = "Confirmed Fall";
+    console.log("FallCamera: confirmed fall threshold reached");
+    console.log("FallCamera: real camera confirmed fall");
+    handleFallConfirmed();
+    markCurrentFallAlertConfirmedIfNeeded();
+  }
+
   function renderLogs() {
     const logs = getLogs();
     logList.innerHTML = "";
@@ -589,7 +624,6 @@
     if (!postureInfo.hasPerson) {
       personStatus.textContent = "No person";
       postureStatus.textContent = "Unknown";
-      fallStatus.textContent = "Normal";
       return;
     }
 
@@ -600,11 +634,18 @@
   // Fall detection: require lying posture to persist before changing severity.
   function handleFallDetection(postureInfo, now = Date.now()) {
     if (!postureInfo.hasPerson || postureInfo.posture !== "Lying") {
-      resetFallEvent(now, true);
-      fallStatus.textContent = "Normal";
+      if (!fallExitStartedAt) {
+        fallExitStartedAt = now;
+      }
+
+      if (fallExitStartedAt && now - fallExitStartedAt >= FALL_RESET_GRACE_MS) {
+        resetFallEvent(now, true);
+        fallStatus.textContent = "Normal";
+      }
       return;
     }
 
+    fallExitStartedAt = null;
     if (!lyingStartAt) lyingStartAt = now;
 
     const lyingDuration = now - lyingStartAt;
@@ -612,6 +653,7 @@
       0,
       Math.min(1, postureInfo.confidence || 0),
     );
+    console.log(`FallCamera: lying duration ms=${lyingDuration}`);
 
     if (lyingDuration >= CONFIRMED_FALL_MS) {
       fallStatus.textContent = "Confirmed Fall";
@@ -645,25 +687,12 @@
 
         currentFallAlertId = alertId;
         addLog(`Fall alert created: ${alertId}`);
+        markCurrentFallAlertConfirmedIfNeeded();
       });
     }
 
-    if (
-      lyingDuration >= CONFIRMED_FALL_MS &&
-      fallEventActive &&
-      currentFallAlertId &&
-      !confirmedUpdateSent &&
-      !confirmedUpdatePending
-    ) {
-      confirmedUpdateSent = true;
-      confirmedUpdatePending = true;
-      addLog(`Fall event confirmed: ${currentFallAlertId}`);
-      handleFallConfirmed();
-
-      updateFallAlertConfirmed(currentFallAlertId)
-        .finally(() => {
-          confirmedUpdatePending = false;
-        });
+    if (lyingDuration >= CONFIRMED_FALL_MS) {
+      confirmFallFromCamera();
     }
   }
 
@@ -735,6 +764,8 @@
     fallEventActive = false;
     currentFallAlertId = null;
     fallAlertCreatePending = false;
+    currentFallEventConfirmed = false;
+    fallExitStartedAt = null;
     confirmedUpdateSent = false;
     confirmedUpdatePending = false;
     fallEventGeneration += 1;

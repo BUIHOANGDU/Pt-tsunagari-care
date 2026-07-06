@@ -223,3 +223,63 @@ Sua fallback cua Fall Camera de van tao duoc `emergency_check` cho Chami khi `Fi
 ### Viec con lai
 
 - Test that voi Firebase that va monitor ESP-IDF de xac nhan `hasCommand:true`, `action=emergency_check`, `TsunagariCare emergency check received`.
+
+## 2026-07-07 00:52:12 +09:00
+
+### Muc tieu lan sua
+
+Sua loi real camera `Confirmed Fall` da hien tren UI nhung khong goi Chami `emergency_check`.
+
+### File da sua
+
+- `fall-camera.js`
+- `PROJECT_HISTORY.md`
+
+### Thay doi chinh
+
+- Them `FALL_RESET_GRACE_MS = 1500` de khong reset fall event qua som chi vi vai frame hut `Lying`.
+- Them guard `currentFallEventConfirmed` de moi fall event chi confirm mot lan.
+- Tao ham duy nhat `confirmFallFromCamera()` cho nhanh real detection:
+  - log `FallCamera: confirmed fall threshold reached`
+  - log `FallCamera: real camera confirmed fall`
+  - set `Fall Status = Confirmed Fall`
+  - goi `handleFallConfirmed()`
+- Bo sung log debug:
+  - `FallCamera: lying duration ms=...`
+- Real detection khong con phu thuoc cung luc vao `currentFallAlertId` moi duoc goi Chami:
+  - neu command cho Chami duoc tao truoc, Firestore `fallAlerts` co the update confirmed sau khi `alertId` ve
+  - neu `alertId` da co roi thi `markCurrentFallAlertConfirmedIfNeeded()` cap nhat confirmed nhu cu
+- `updatePoseStatus()` khong con ep `fallStatus = Normal` ngay khi mat person trong mot frame; viec reset duoc de cho `handleFallDetection()` xu ly theo grace period.
+- Neu user van dang `Lying`, code khong con reset event ngay va khong nen spam `Fall event ended`.
+
+### Lenh kiem tra da chay
+
+- `Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz'`
+- `Get-Content fall-camera.js`
+- `node --check fall-camera.js`
+
+### Ket qua kiem tra
+
+- `node --check fall-camera.js`: pass
+
+### Cach test thu cong
+
+1. `Ctrl+F5` trang `fall-camera.html`.
+2. Bam `Start Camera`.
+3. Nam/nga that truoc webcam den khi UI hien `Confirmed Fall`.
+4. Kiem tra console co:
+   - `FallCamera: lying duration ms=...`
+   - `FallCamera: confirmed fall threshold reached`
+   - `FallCamera: real camera confirmed fall`
+   - `Fall confirmed by camera`
+   - `Creating Chami emergency_check command from fall camera`
+   - `Created Chami emergency_check command from fall camera`
+5. Kiem tra monitor ESP-IDF co:
+   - `hasCommand:true`
+   - `action=emergency_check`
+   - `TsunagariCare emergency check received`
+
+### Viec con lai
+
+- Xac nhan that trong browser voi webcam va Firebase that.
+- Neu van thay `Fall event ended` khi `Posture Status` van la `Lying`, can thu thap log moi quanh `lying duration` va `grace` de tinh chinh them.
