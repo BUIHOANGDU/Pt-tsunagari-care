@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>TsunagariCare | Fall Detection Camera MVP</title>
+    <link rel="icon" href="data:," />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -26,7 +27,7 @@
       </header>
 
       <section class="camera-layout" aria-labelledby="page-title">
-        <div class="camera-stage">
+        <div class="camera-stage camera-primary-panel">
           <div class="camera-stage-header">
             <div>
               <p class="kicker">Webcam preview</p>
@@ -60,6 +61,9 @@
             <button id="test-fall-alert" class="danger" type="button">
               Test Fall Alert
             </button>
+            <button id="reset-fall-state" class="secondary" type="button">
+              Reset Fall State
+            </button>
             <button id="clear-log" class="secondary" type="button">
               Clear Local Log
             </button>
@@ -74,8 +78,8 @@
           </p>
         </div>
 
-        <aside class="status-panel" aria-label="Camera detection status">
-          <section>
+        <aside class="status-panel camera-status-panel" aria-label="Camera detection status">
+          <section class="camera-status-summary">
             <p class="kicker">Camera</p>
             <dl class="status-grid">
               <div>
@@ -91,8 +95,28 @@
                 <dd id="posture-status">Unknown</dd>
               </div>
               <div>
+                <dt>Detection stage</dt>
+                <dd id="detection-stage">Normal</dd>
+              </div>
+              <div>
                 <dt>Fall status</dt>
                 <dd id="fall-status">Normal</dd>
+              </div>
+              <div>
+                <dt>Lying duration</dt>
+                <dd id="lying-duration">0.0s / 3.0s</dd>
+              </div>
+              <div>
+                <dt>Fall confidence</dt>
+                <dd id="fall-confidence">0% (demo)</dd>
+              </div>
+              <div>
+                <dt>Cooldown</dt>
+                <dd id="cooldown-status">Ready</dd>
+              </div>
+              <div>
+                <dt>Last Chami command</dt>
+                <dd id="last-chami-command">Waiting</dd>
               </div>
               <div>
                 <dt>Camera ID</dt>
@@ -105,7 +129,7 @@
             </dl>
           </section>
 
-          <section class="log-section" aria-labelledby="log-title">
+          <section class="log-section camera-log-panel" aria-labelledby="log-title">
             <div class="log-heading">
               <p class="kicker">Local log</p>
               <h2 id="log-title">Events</h2>

@@ -283,3 +283,132 @@ Sua loi real camera `Confirmed Fall` da hien tren UI nhung khong goi Chami `emer
 
 - Xac nhan that trong browser voi webcam va Firebase that.
 - Neu van thay `Fall event ended` khi `Posture Status` van la `Lying`, can thu thap log moi quanh `lying duration` va `grace` de tinh chinh them.
+
+## 2026-07-21 01:10:03 +09:00
+
+### Muc tieu lan sua
+
+Nang cap Fall Detection Camera V2 de state machine ro rang hon, UI de demo hon, giam bao gia va giu on dinh flow `emergency_check` cua Chami.
+
+### File da sua
+
+- `fall-camera.html`
+- `fall-camera.css`
+- `fall-camera.js`
+- `PROJECT_HISTORY.md`
+
+### Logic moi
+
+- Chuan hoa state machine fall:
+  - `normal`
+  - `suspected_fall`
+  - `confirmed_fall`
+  - `chami_check_sent`
+  - `cooldown`
+- Them UI moi:
+  - `Detection Stage`
+  - `Lying Duration`
+  - `Fall Confidence`
+  - `Cooldown`
+  - `Last Chami Command`
+- Them nut `Reset Fall State`:
+  - reset state demo hien tai
+  - khong xoa Firebase alert/command
+  - log `FallCamera: manual fall state reset`
+- Them favicon inline:
+  - `<link rel="icon" href="data:,">`
+- Dieu chinh threshold demo:
+  - `CONFIRMED_FALL_MS = 3000`
+  - `FALL_RESET_GRACE_MS = 1500`
+  - `FALL_EMERGENCY_COOLDOWN_MS = 30000`
+- Logic moi cho lying/fall:
+  - vao `Lying` thi log `FallCamera: lying candidate started`
+  - log `FallCamera: lying duration ms=...` theo chu ky `1000 ms`
+  - vao stage `suspected_fall`
+  - du `CONFIRMED_FALL_MS` thi log:
+    - `FallCamera: confirmed fall threshold reached`
+    - `FallCamera: real camera confirmed fall`
+  - goi flow `handleFallConfirmed()`
+- Sau khi tao command cho Chami thanh cong:
+  - vao stage `chami_check_sent`
+  - hien `Đã yêu cầu Chami kiểm tra người dùng`
+  - cap nhat `Last Chami Command`
+- Sau khi nguoi dung roi khoi tu the nam qua grace period:
+  - reset fall event
+  - log `FallCamera: fall event reset after recovery`
+  - neu dang cooldown thi UI hien countdown va log `FallCamera: fall emergency cooldown active`
+- Van giu nguyen:
+  - payload command `emergency_check`
+  - uu tien `FirebaseService`, fallback `firebase.database()`
+  - pending command check
+  - nut `Test Fall Alert`
+
+### Lenh kiem tra
+
+- `Get-Content package.json`
+- `Get-Content fall-camera.html`
+- `Get-Content fall-camera.css`
+- `Get-Content fall-camera.js`
+- `node --check fall-camera.js`
+
+### Ket qua test
+
+- `node --check fall-camera.js`: pass
+- `package.json` hien khong co `build` script, nen repo static nay khong co lenh build rieng de chay.
+- Chua chay test webcam/Firebase that trong browser tu session nay.
+
+### Viec con lai
+
+- Test that trong browser voi webcam de xac nhan stage `Normal -> Suspected Fall -> Confirmed Fall -> Chami Check Sent -> Cooldown`.
+- Test lai nut `Test Fall Alert` va `Reset Fall State`.
+- Xac nhan command `emergency_check` van duoc tao dung schema va Chami nhan command nhu truoc.
+
+## 2026-07-22 01:24:18 +09:00
+
+### Muc tieu lan sua
+
+Refactor giao dien Fall Detection Camera thanh dashboard gon trong mot man hinh desktop, giam scroll doc ma khong thay doi logic detection, Firebase hoac command Chami.
+
+### File da sua
+
+- `fall-camera.html`
+- `fall-camera.css`
+- `PROJECT_HISTORY.md`
+
+### Thay doi chinh
+
+- Mo rong `.camera-page` toi `min(1440px, calc(100% - 32px))` va giam padding, khoang cach header.
+- Doi layout desktop thanh 2 cot: webcam/controls ben trai va status/local log ben phai.
+- Giu webcam 16:9, gioi han kich thuoc theo chieu cao viewport tren desktop thap.
+- Xep status cards thanh grid 2 cot, giam padding/font va cho phep `Last Chami command` tu xuong dong an toan.
+- Gioi han Local Log toi da `190px`, cho scroll noi bo va giu nguyen gioi han 20 event trong JavaScript.
+- Thu gon cac nut dieu khien de nam cung hang khi du cho, van `flex-wrap` khi man hinh hep.
+- Responsive: 2 cot tu `1000px`, 1 cot duoi `1000px`, status ve 1 cot tren mobile duoi `640px`.
+- Giu nguyen tat ca DOM id va khong sua `fall-camera.js`, MediaPipe Pose, fall state machine, FirebaseService hay payload `emergency_check`.
+
+### Lenh kiem tra
+
+- `node --check fall-camera.js`
+- `git diff --check -- tsunagari-care/fall-camera.html tsunagari-care/fall-camera.css tsunagari-care/fall-camera.js`
+- Doi chieu 20 DOM id bat buoc giua `fall-camera.html` va `fall-camera.js`.
+
+### Ket qua kiem tra
+
+- `node --check fall-camera.js`: pass.
+- `git diff --check`: pass; chi co canh bao line ending LF/CRLF cua Git, khong co whitespace error.
+- Ca 20 DOM id bat buoc ton tai dung 1 lan trong HTML va duoc JS truy cap dung 1 lan.
+- `package.json` khong co build script; repo static nay khong co lenh build rieng de chay.
+- Chua mo Live Server hoac test webcam/Firebase that trong session nay.
+
+### Cach test thu cong
+
+1. Mo `fall-camera.html` bang Live Server va nhan `Ctrl+F5`.
+2. Test `Start Camera`, `Stop Camera`, `Test Fall Alert`, `Reset Fall State` va `Clear Local Log`.
+3. Xac nhan skeleton va stage `Normal -> Suspected Fall -> Confirmed Fall -> Chami Check Sent` van cap nhat.
+4. Tren desktop, xac nhan webcam/status hien 2 cot va Local Log scroll ben trong khung.
+5. Thu hep trinh duyet duoi `1000px` va `640px` de xac nhan layout ve 1 cot, nut khong bi vo.
+
+### Viec con lai
+
+- Xac nhan truc quan tren man hinh desktop thuc te va tinh chinh neu do phan giai demo co chieu cao dac biet.
+- Test webcam, Firebase va robot Chami that sau khi refresh bang Live Server.
