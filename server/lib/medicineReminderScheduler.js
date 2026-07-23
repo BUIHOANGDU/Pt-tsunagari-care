@@ -181,8 +181,25 @@ async function rollbackReminderTriggerMarker(
   });
 }
 
-async function processDueReminder(reminderId, reminder, now, zonedNow) {
+async function processDueReminder(reminderId, reminder, zonedNow) {
   const target = reminder.targetDeviceId || DEFAULT_TARGET_DEVICE_ID;
+  const invalidReason = getInvalidReason(reminder);
+
+  if (invalidReason) {
+    log(`skip id=${reminderId} reason=${invalidReason}`);
+    return;
+  }
+  if (zonedNow.time !== reminder.time) {
+    log(
+      `skip id=${reminderId} reason=time_not_due ` +
+        `now=${zonedNow.time} expected=${reminder.time}`,
+    );
+    return;
+  }
+  if (reminder.lastTriggeredDate === zonedNow.date) {
+    log(`skip id=${reminderId} reason=already_triggered_today`);
+    return;
+  }
 
   if (await hasPendingMedicineReminderCommand(target)) {
     log(`skip id=${reminderId} reason=pending_command_exists`);
@@ -191,40 +208,21 @@ async function processDueReminder(reminderId, reminder, now, zonedNow) {
 
   const previousLastTriggeredDate = reminder.lastTriggeredDate ?? null;
   const previousLastTriggeredAt = reminder.lastTriggeredAt ?? null;
-  const reminderRef = getSchedulerDb().ref(`reminders/${reminderId}`);
-  let transactionReason = "record_changed";
+  const triggerDateRef = getSchedulerDb().ref(
+    `reminders/${reminderId}/lastTriggeredDate`,
+  );
+  let transactionReason = "already_triggered_today";
 
-  log(`transaction start id=${reminderId}`);
-  const transactionResult = await reminderRef.transaction((current) => {
-    const invalidReason = getInvalidReason(current);
-    if (invalidReason) {
-      transactionReason = invalidReason;
-      return;
-    }
-
-    const currentZonedNow = getZonedDateTimeParts(
-      now,
-      current.timezone || DEFAULT_TIMEZONE,
-    );
-    if (
-      currentZonedNow.date !== zonedNow.date ||
-      currentZonedNow.time !== current.time
-    ) {
-      transactionReason = "time_not_due";
-      return;
-    }
-    if (current.lastTriggeredDate === currentZonedNow.date) {
+  log(`transaction start id=${reminderId} path=lastTriggeredDate`);
+  const transactionResult = await triggerDateRef.transaction((currentDate) => {
+    log(`transaction currentDate=${currentDate ?? "null"}`);
+    if (currentDate === zonedNow.date) {
       transactionReason = "already_triggered_today";
       return;
     }
 
     transactionReason = "committed";
-    return {
-      ...current,
-      lastTriggeredDate: currentZonedNow.date,
-      lastTriggeredAt: Date.now(),
-      updatedAt: Date.now(),
-    };
+    return zonedNow.date;
   });
 
   if (!transactionResult.committed) {
@@ -234,12 +232,16 @@ async function processDueReminder(reminderId, reminder, now, zonedNow) {
     return;
   }
 
-  log(`transaction committed id=${reminderId}`);
-  const committedReminder = transactionResult.snapshot.val();
+  log(`transaction committed id=${reminderId} date=${zonedNow.date}`);
 
   try {
-    await createMedicineReminderCommand(reminderId, committedReminder);
-    await createMedicineReminderCareLog(committedReminder);
+    await getSchedulerDb().ref(`reminders/${reminderId}`).update({
+      lastTriggeredAt: getServerTimestamp(),
+      updatedAt: getServerTimestamp(),
+    });
+    log(`trigger timestamps updated id=${reminderId}`);
+    await createMedicineReminderCommand(reminderId, reminder);
+    await createMedicineReminderCareLog(reminder);
   } catch (error) {
     logError(`command/care log failed id=${reminderId}`, error);
     try {
@@ -248,7 +250,7 @@ async function processDueReminder(reminderId, reminder, now, zonedNow) {
         previousLastTriggeredDate,
         previousLastTriggeredAt,
       );
-      log(`transaction marker rolled back id=${reminderId}`);
+      log(`transaction marker rollback succeeded id=${reminderId}`);
     } catch (rollbackError) {
       logError(`transaction marker rollback failed id=${reminderId}`, rollbackError);
     }
@@ -309,7 +311,7 @@ async function runMedicineReminderSchedulerTick(now = new Date()) {
     }
 
     log(`due id=${reminderId}`);
-    await processDueReminder(reminderId, reminder, now, zonedNow);
+    await processDueReminder(reminderId, reminder, zonedNow);
   }
 }
 
