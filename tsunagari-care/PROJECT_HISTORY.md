@@ -1,5 +1,127 @@
 # Project History
 
+## 2026-07-23 23:50:57 +09:00
+
+### Muc tieu lan sua
+
+Phat trien Medication Reminder MVP cho TsunagariCare: dashboard quan ly lich nhac thuoc hang ngay, server scheduler tao command dung gio cho Chami, va ghi care log that khi da gui loi nhac.
+
+### File da sua
+
+- `index.html`
+- `src/css/style.css`
+- `src/js/firebase-service.js`
+- `src/js/dashboard.js`
+- `server/index.js`
+- `server/lib/medicineReminderScheduler.js`
+- `PROJECT_HISTORY.md`
+
+### Data path
+
+- Reminder chinh: `reminders/medicine_morning`
+- Command queue: `commands`
+- Care log: `care_logs`
+
+### Reminder schema
+
+- `type: "medicine"`
+- `medicineName: "Thuoc huyet ap"` mac dinh tren UI
+- `time: "08:00"` theo dinh dang `HH:mm`
+- `timezone: "Asia/Tokyo"`
+- `repeat: "daily"`
+- `enabled: true`
+- `targetDeviceId: "chami_001"`
+- `lastTriggeredDate: null` hoac `YYYY-MM-DD` theo Asia/Tokyo
+- `lastTriggeredAt: null` hoac timestamp
+- `createdAt`, `updatedAt`
+
+### UI da them
+
+- Card `Lich nhac uong thuoc` gan khu vuc Care Logs / Command Queue.
+- Field ten thuoc, gio uong, lap lai hang ngay, timezone Asia/Tokyo, toggle trang thai, lan nhac gan nhat.
+- Nut `Luu lich` va `Nhac ngay`.
+- Trang thai UI cho save, reminder disabled, pending command, va loi tao command.
+
+### FirebaseService
+
+- Them helper:
+  - `getMedicineReminder(reminderId = "medicine_morning")`
+  - `listenMedicineReminder(callback, reminderId = "medicine_morning")`
+  - `saveMedicineReminder(data, reminderId = "medicine_morning")`
+  - `setMedicineReminderEnabled(enabled, reminderId = "medicine_morning")`
+  - `createMedicineReminderCommand(...)`
+  - `hasPendingMedicineReminderCommand(target)`
+- `saveMedicineReminder()` validate ten thuoc va gio `HH:mm`, giu `createdAt` cu neu record da ton tai, cap nhat `updatedAt`, khong ghi `undefined`.
+- Nut `Nhac ngay` kiem tra pending command truoc khi tao va khong cap nhat `lastTriggeredDate`.
+
+### Server scheduler
+
+- Scheduler khoi tao trong `server/index.js` khi server listen thanh cong.
+- Logic nam trong `server/lib/medicineReminderScheduler.js`.
+- Chay moi 60 giay bang `setInterval`, co guard module-level `medicineReminderSchedulerStarted`.
+- Dung `Intl.DateTimeFormat` voi timezone mac dinh `Asia/Tokyo`, fallback Asia/Tokyo neu timezone khong hop le.
+- Moi tick doc `reminders`, loc reminder medicine daily enabled, so sanh `HH:mm` theo timezone cua reminder.
+- Dung transaction tren reminder record de set `lastTriggeredDate` va `lastTriggeredAt`, tranh trigger trung trong cung ngay.
+- Kiem tra pending command `target === targetDeviceId`, `action === "remind_medicine"`, `status === "pending"` truoc khi tao command.
+- Sau transaction thanh cong moi tao command:
+  - `source: "medicine_scheduler"`
+  - `target: "chami_001"`
+  - `type: "robot_action"`
+  - `action: "remind_medicine"`
+  - `text: "Da den gio uong thuoc: <medicineName>"`
+  - `status: "pending"`
+- Sau khi tao command thanh cong moi ghi care log:
+  - `type: "medicine_reminder_sent"`
+  - `source: "medicine_scheduler"`
+  - `target: "chami_001"`
+  - `message: "Da gui loi nhac uong thuoc"`
+  - `status: "sent"`
+- Khong tu ghi `Da uong thuoc`.
+- Neu command/care log loi sau transaction, scheduler log loi va rollback marker ve gia tri truoc tick neu co the.
+
+### Logging
+
+- Co cac log chinh:
+  - `Medicine reminder scheduler started`
+  - `Medicine reminder scheduler tick`
+  - `Medicine reminder due: <reminderId>`
+  - `Medicine reminder skipped: disabled`
+  - `Medicine reminder skipped: invalid time`
+  - `Medicine reminder skipped: already triggered today`
+  - `Medicine reminder command created`
+  - `Medicine reminder care log created`
+  - `Medicine reminder scheduler error`
+  - `Medicine reminder command already pending`
+
+### Lenh kiem tra da chay
+
+- `node --check src/js/dashboard.js`
+- `node --check src/js/firebase-service.js`
+- `node --check server/index.js`
+- `node --check server/lib/medicineReminderScheduler.js`
+- `git diff --check`
+- `Get-Date -Format "yyyy-MM-dd HH:mm:ss zzz"`
+- `npm run` (bi PowerShell execution policy chan qua `npm.ps1`)
+- `npm.cmd run`
+
+### Ket qua kiem tra
+
+- Tat ca lenh `node --check` o tren: pass.
+- `git diff --check`: pass, chi co canh bao LF/CRLF cua Git tren Windows.
+- `package.json` chi co script `bridge`, khong co build/test script rieng.
+- `npm.cmd run`: pass va xac nhan chi co script `bridge`.
+- Chua test thu cong voi RTDB/Chami that tu terminal nay.
+
+### Viec con lai
+
+- Test thu cong tren dashboard voi Firebase Realtime Database that:
+  - luu lich `reminders/medicine_morning`
+  - bam `Nhac ngay`
+  - dat gio hien tai Tokyo + 1 phut va quan sat scheduler
+  - kiem tra duplicate prevention khi co pending command
+  - kiem tra disabled schedule khong tao command
+- Khong ghi secret/token/API key/service account.
+
 ## 2026-07-06 01:00:47 +09:00
 
 ### Muc tieu lan sua
@@ -412,3 +534,236 @@ Refactor giao dien Fall Detection Camera thanh dashboard gon trong mot man hinh 
 
 - Xac nhan truc quan tren man hinh desktop thuc te va tinh chinh neu do phan giai demo co chieu cao dac biet.
 - Test webcam, Firebase va robot Chami that sau khi refresh bang Live Server.
+
+## 2026-07-22 01:47:55 +09:00
+
+### Muc tieu lan sua
+
+Them Dashboard Fall Response Timeline de hien thi ro flow Camera phat hien nga -> gui Chami kiem tra -> ket qua -> canh bao nguoi nha ma khong can doc Console/monitor.
+
+### File da sua
+
+- `index.html`
+- `src/js/dashboard.js`
+- `src/css/style.css`
+- `PROJECT_HISTORY.md`
+
+### Data path da dung
+
+- Firestore `fallAlerts`: doc `fall_detected` co `status=confirmed` hoac `confirmedAt`, kem `cameraId`, `location`, `createdAt`.
+- Realtime Database `commands`: command `source=fall_camera`, `target=chami_001`, `type=robot_action`, `action=emergency_check`.
+- Realtime Database `alerts`: alert Chami `type=emergency_response`, `level=danger`, `source=chami_001`; message duoc dung de phan biet danger va no_response.
+- Realtime Database `care_logs`: chi duoc dung lam bang chung safe neu log co nguon Chami, ngu canh emergency/fall va status/message safe ro rang.
+- `devices` van duoc dashboard doc cho robot/device status, nhung khong duoc dung de suy dien ket qua emergency.
+
+### Logic timeline
+
+- Them card `Quy trinh xu ly nga` gom 5 buoc: fall detected, Chami command, Chami checking, response result va family alert.
+- Chi hien thi flow gan nhat trong 24 gio; tuong quan command/result trong cua so 15 phut quanh fall event.
+- Timeline tu cap nhat bang listener realtime hien co, khong them polling.
+- Nho command `emergency_check` da quan sat trong phien dashboard de khong mat buoc command ngay khi backend xoa command sau xu ly.
+- Danger va no_response chi hien thi khi co alert `emergency_response` that tu Chami.
+- Safe chi hien thi khi co care log safe that; neu thieu thi hien `Dang cho ket qua tu Chami` va log `Dashboard: Safe result log is not available yet`.
+- Timeline hien mot flow gan nhat de card gon; desktop hien ngang, tablet cuon ngang va mobile hien doc.
+- Khong sua `firebase-service.js`, Firebase config, Fall Camera, backend hay firmware.
+
+### Logging
+
+- `Dashboard: Fall response timeline data loaded`
+- `Dashboard: Fall response timeline updated`
+- `Dashboard: No recent fall response timeline`
+- `Dashboard: Safe result log is not available yet`
+
+### Lenh kiem tra
+
+- `node --check src/js/dashboard.js`
+- `node --check src/js/firebase-service.js`
+- `git diff --check -- tsunagari-care/index.html tsunagari-care/src/js/dashboard.js tsunagari-care/src/css/style.css`
+- Kiem tra so cap dau ngoac CSS.
+
+### Ket qua kiem tra
+
+- `node --check src/js/dashboard.js`: pass.
+- `node --check src/js/firebase-service.js`: pass; file nay khong bi sua.
+- `git diff --check`: pass; chi co canh bao line ending LF/CRLF cua Git.
+- CSS co so dau ngoac mo/dong bang nhau.
+- `package.json` khong co build script, nen khong co lenh build frontend rieng.
+- Chua chay Live Server/Firebase/robot test that trong session terminal nay.
+
+### Cach test thu cong
+
+1. Mo `index.html` va `fall-camera.html` bang Live Server, sau do `Ctrl+F5` ca hai trang.
+2. Bam `Test Fall Alert` hoac tao real confirmed fall va kiem tra timeline hien camera + command + dang cho Chami.
+3. Noi `痛いです`, `助けて` hoac `tasukete`; timeline phai chuyen sang danger va family alert.
+4. Tao flow moi va khong tra loi; timeline phai hien no_response va family alert.
+5. Noi `大丈夫です`; khi firmware chua gui safe care log, timeline khong duoc hien safe ma phai tiep tuc bao thieu du lieu ket qua.
+
+### Viec con lai
+
+- Test realtime that voi Firestore, RTDB va Chami sau khi mo bang Live Server.
+- De hien safe chinh xac sau khi reload dashboard, firmware/backend can ghi mot `care_logs` safe rieng cho emergency response.
+- Neu can luu timeline hoan chinh lau dai, co the bo sung event/care log khi Chami bat dau va ket thuc emergency flow o buoc backend sau.
+
+## 2026-07-22 02:02:51 +09:00
+
+### Muc tieu lan sua
+
+Sua Dashboard Fall Response Timeline de dung event that trong Realtime Database thay vi suy luan va ghep `fallAlerts` cu voi alert Chami moi.
+
+### File da sua
+
+- `fall-camera.js`
+- `index.html`
+- `src/js/dashboard.js`
+- `src/js/firebase-service.js`
+- `src/css/style.css`
+- `PROJECT_HISTORY.md`
+
+### Path va schema moi
+
+- Them Realtime Database path `care_events`.
+- Event co cac field: `flow`, `flowId`, `source`, `type`, `status`, `message`, `detail`, `relatedCommandId`, `relatedAlertId`, `cameraId`, `location`, `createdAt`.
+- Khong luu anh/video va khong thay doi schema command Chami hien co.
+
+### Logic Fall Camera
+
+- Moi fall event tao `flowId` dang `fall_<timestamp>`.
+- Khi confirm fall, ghi event `fall_confirmed` mot lan cho flow.
+- Khi tao `emergency_check` thanh cong, ghi event `chami_command_sent` cung `flowId` va `relatedCommandId`.
+- Event log khong chan flow tao command; neu ghi event loi thi Fall Camera log warning va van tiep tuc emergency flow.
+- Lap lai nut Test trong cooldown khong tao event moi; sau cooldown co the tao flow demo moi.
+
+### Logic Dashboard
+
+- Timeline chi subscribe va render tu `care_events` co `flow=fall_response`.
+- Xoa hoan toan logic cu suy luan timeline tu `fallAlerts`, `commands`, `alerts` va `care_logs`.
+- Chi hien event trong 10 phut gan nhat; timer 30 giay chi loc lai UI cuc bo, khong request Firebase.
+- Alert Chami `type=emergency_response` duoc anh xa thanh `chami_alert_received` voi dung `createdAt` cua alert goc.
+- Dung event ID `chami_alert_<relatedAlertId>` va RTDB transaction de chong ghi trung qua reload/nhieu tab.
+- Neu tim thay flow gan nhat trong 10 phut, alert Chami duoc gan cung `flowId`; neu khong co thi hien nhu event doc lap voi timestamp that.
+- Danger hien `Da gui canh bao khan cap cho nguoi nha`; no_response hien `Khong co phan hoi sau thoi gian cho`.
+- Neu chua co result event, hien `Dang cho ket qua tu Chami`.
+- Safe chi hien khi `care_events` co status `safe` that; firmware/backend hien chua gui event nay.
+
+### Logging
+
+- Fall Camera:
+  - `FallCamera: care event written: fall_confirmed`
+  - `FallCamera: care event written: chami_command_sent`
+- Dashboard:
+  - `Dashboard: Fall response care events loaded`
+  - `Dashboard: Fall response timeline updated from care_events`
+  - `Dashboard: No recent fall response timeline`
+  - `Dashboard: Chami emergency alert mapped to timeline`
+
+### Lenh kiem tra
+
+- `node --check fall-camera.js`
+- `node --check src/js/dashboard.js`
+- `node --check src/js/firebase-service.js`
+- `git diff --check -- tsunagari-care/fall-camera.js tsunagari-care/index.html tsunagari-care/src/js/dashboard.js tsunagari-care/src/js/firebase-service.js tsunagari-care/src/css/style.css`
+- Kiem tra source khong con reference toi helper timeline suy luan cu.
+- Kiem tra so cap dau ngoac CSS.
+
+### Ket qua kiem tra
+
+- Ca ba lenh `node --check`: pass.
+- `git diff --check`: pass; chi co canh bao line ending LF/CRLF cua Git.
+- Khong con reference toi `latestTimeline*`, `fallTimelineDataReady`, `observedEmergencyCommands` hoac `FALL_TIMELINE_*`.
+- CSS co so dau ngoac mo/dong bang nhau.
+- `package.json` khong co build frontend script; chi co script `bridge`.
+- Chua chay Live Server/Firebase/Chami test that trong session terminal nay.
+
+### Cach test thu cong
+
+1. Mo `index.html` va `fall-camera.html` bang Live Server, sau do `Ctrl+F5`.
+2. Bam `Test Fall Alert` va xac nhan RTDB `care_events` co `fall_confirmed` va `chami_command_sent` cung `flowId`.
+3. Xac nhan dashboard hien dung timestamp moi cua hai event.
+4. Test danger; alert Chami moi phai tao duy nhat mot `chami_alert_received` status `danger` va timeline dung timestamp alert.
+5. Test no_response; timeline phai hien status `no_response` voi timestamp moi.
+6. Reload dashboard va xac nhan khong tao trung event cho cung `relatedAlertId`.
+7. Test safe; neu chua co care event safe that, timeline phai hien dang cho va khong tu hien safe.
+
+### Viec con lai
+
+- Xac nhan Firebase rules cho phep web client doc/ghi path `care_events` trong moi truong demo.
+- Test full flow voi Live Server, Firebase that va robot Chami.
+- Them safe event tu firmware/backend trong buoc sau de hien ket qua `大丈夫です` chinh xac va ben vung sau reload.
+
+## 2026-07-23 11:31:17 +09:00
+
+### Muc tieu lan sua
+
+Sua loi Fall Response Timeline trong khi Alert Center da co alert Chami `emergency_response` moi nhung card van hien empty do `care_events` chua co du lieu hoac bi Firebase Rules chan.
+
+### File da sua
+
+- `src/js/dashboard.js`
+- `src/js/firebase-service.js`
+- `PROJECT_HISTORY.md`
+
+### Nguyen nhan
+
+- Callback `alerts` chi map alert sang `care_events` sau khi listener `care_events` da load thanh cong.
+- Neu doc `care_events` bi permission denied, co `fallResponseCareEventsLoaded` khong bat va alert moi khong duoc map.
+- Timeline chi render tu `care_events`, khong co fallback truc tiep tu alert dang duoc Alert Center hien thi.
+
+### Logic moi
+
+- Van uu tien `care_events` flow `fall_response` trong 10 phut gan nhat.
+- Neu khong co care event gan day, timeline render truc tiep tu alert Chami `emergency_response` moi nhat.
+- Neu care event co nhung chua chua alert Chami moi hon, tam render alert fallback cho toi khi mapping thanh cong.
+- Fallback toi thieu gom:
+  - `Chami da hoan tat kiem tra`
+  - `Khong co phan hoi sau thoi gian cho` hoac `Nguoi dung can tro giup`
+  - `Da gui canh bao khan cap cho nguoi nha`
+- Fallback dung dung `createdAt` cua alert; khong hien buoc camera neu khong co care event camera that.
+- Alert listener luon render fallback va thu ghi care event, khong con phu thuoc vao trang thai load `care_events`.
+- Ghi care event van chong duplicate bang `relatedAlertId`/event ID deterministic.
+- Neu ghi bi permission denied, dashboard log loi va tiep tuc dung fallback, khong lam vo Alert Center.
+- Neu listener `care_events` bi loi, FirebaseService tra danh sach rong cho subscriber de dashboard thoat loading va dung fallback.
+
+### Phan loai va timestamp
+
+- `no_response`, `no response`, `Khong co phan hoi` va `Khong co phan hoi` co dau deu duoc phan loai `no_response` sau khi normalize Unicode.
+- Alert emergency_response danger khac duoc phan loai `danger`.
+- Parser timestamp ho tro number, numeric string, ISO string, Firebase `toDate`, `toMillis`, va object `seconds/nanoseconds`.
+- Neu timestamp khong parse duoc, log warning mot lan va dung thoi diem dashboard nhan alert lam fallback on dinh.
+- Khong suy dien safe; safe van can care event status `safe` that tu Chami.
+
+### Logging
+
+- `Dashboard: Chami emergency alert mapped to timeline`
+- `Dashboard: care_event write skipped duplicate alert`
+- `Dashboard: care_event write failed, using alert fallback`
+- `Dashboard: Fall response timeline rendered from care_events`
+- `Dashboard: Fall response timeline rendered from alert fallback`
+- Debug co kiem soat ghi so recent care events, alert emergency moi nhat va render source khi timeline thay doi.
+
+### Lenh kiem tra
+
+- `node --check src/js/dashboard.js`
+- `node --check src/js/firebase-service.js`
+- `git diff --check -- tsunagari-care/src/js/dashboard.js tsunagari-care/src/js/firebase-service.js`
+
+### Ket qua kiem tra
+
+- Hai lenh `node --check`: pass.
+- `git diff --check`: pass; chi co canh bao line ending LF/CRLF cua Git.
+- `package.json` khong co build frontend script; chi co script `bridge`.
+- Chua chay Live Server/Firebase/Chami test that trong session terminal nay.
+
+### Cach test thu cong
+
+1. Mo `index.html` bang Live Server va nhan `Ctrl+F5`.
+2. Tao alert Chami `emergency_response` no_response hoac danger moi.
+3. Xac nhan Alert Center va timeline deu hien dung alert/timestamp moi.
+4. Neu `care_events` empty hoac permission denied, Console phai co log render tu alert fallback va timeline khong duoc empty.
+5. Neu mapping thanh cong, timeline chuyen sang render tu `care_events` va khong tao event trung khi reload.
+6. Test safe: neu chua co care event safe that, timeline khong duoc hien safe.
+
+### Viec con lai
+
+- Xac nhan Firebase Rules cho path `care_events`; fallback da bao ve UI nhung event persistence van can quyen ghi.
+- Test full flow voi Live Server, RTDB that va robot Chami.
+- Them safe care event tu firmware/backend o buoc sau.

@@ -181,6 +181,35 @@
         </div>
 
         <section
+          class="panel-card fall-response-card"
+          id="fall-response-card"
+          aria-labelledby="fall-response-title"
+        >
+          <div class="section-heading fall-response-heading">
+            <div>
+              <p class="section-kicker">Care operation center</p>
+              <h2 id="fall-response-title">Quy trình xử lý ngã</h2>
+            </div>
+            <span
+              id="fall-response-summary"
+              class="fall-response-summary is-empty"
+            >
+              Chưa có dữ liệu
+            </span>
+          </div>
+          <div
+            id="fall-response-timeline"
+            class="fall-response-timeline"
+            aria-live="polite"
+          >
+            <div class="empty-state">Chưa có sự kiện ngã gần đây</div>
+          </div>
+          <p id="fall-response-note" class="fall-response-note">
+            Kết quả an toàn chỉ hiển thị khi có care event safe từ Chami.
+          </p>
+        </section>
+
+        <section
           class="panel-card camera-device-card"
           id="camera-device-card"
           aria-labelledby="camera-device-title"
@@ -243,6 +272,57 @@
         </section>
 
         <div class="secondary-row">
+          <section
+            class="panel-card medicine-reminder-card"
+            id="medicine-reminder-card"
+            aria-labelledby="medicine-reminder-title"
+          >
+            <div class="section-heading">
+              <div>
+                <p class="section-kicker">Chami reminder</p>
+                <h2 id="medicine-reminder-title">Lịch nhắc uống thuốc</h2>
+              </div>
+            </div>
+
+            <div class="medicine-reminder-form">
+              <label>
+                <span>Tên thuốc</span>
+                <input
+                  id="medicine-name-input"
+                  type="text"
+                  value="Thuốc huyết áp"
+                  autocomplete="off"
+                />
+              </label>
+              <label>
+                <span>Giờ uống</span>
+                <input id="medicine-time-input" type="time" value="08:00" />
+              </label>
+              <div class="medicine-reminder-readonly">
+                <span>Lặp lại</span>
+                <strong>Hằng ngày</strong>
+              </div>
+              <div class="medicine-reminder-readonly">
+                <span>Múi giờ</span>
+                <strong>Asia/Tokyo</strong>
+              </div>
+              <label class="medicine-reminder-toggle">
+                <input id="medicine-enabled-input" type="checkbox" checked />
+                <span>Trạng thái lịch</span>
+              </label>
+              <div class="medicine-reminder-readonly">
+                <span>Lần nhắc gần nhất</span>
+                <strong id="medicine-last-triggered">Chưa có</strong>
+              </div>
+            </div>
+
+            <div class="btn-row">
+              <button id="medicine-reminder-save" class="primary">Lưu lịch</button>
+              <button id="medicine-reminder-now">Nhắc ngay</button>
+            </div>
+            <p id="medicine-reminder-status" class="medicine-reminder-status" aria-live="polite"></p>
+          </section>
+
           <section class="panel-card health-card" id="health-card" aria-labelledby="health-title">
             <div class="section-heading">
               <div>

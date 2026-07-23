@@ -15,12 +15,28 @@ const PENDING_COMMAND_DISPLAY_LIMIT = 2;
 const RESOLVED_FALL_HISTORY_LIMIT = 3;
 const ROBOT_OFFLINE_TIMEOUT_MS = 90 * 1000;
 const ROBOT_STATUS_REFRESH_INTERVAL_MS = 10 * 1000;
+const FALL_RESPONSE_EVENT_WINDOW_MS = 10 * 60 * 1000;
+const FALL_RESPONSE_CLOCK_SKEW_MS = 30 * 1000;
+const FALL_RESPONSE_TIMELINE_REFRESH_INTERVAL_MS = 30 * 1000;
 const LEGACY_DEMO_MEDICINE_MESSAGE =
   "\u0110\u00e3 u\u1ed1ng thu\u1ed1c (demo)";
 const MEDICINE_REMINDER_COMMAND_TEXT =
   "Nh\u1eafc ng\u01b0\u1eddi d\u00f9ng u\u1ed1ng thu\u1ed1c";
 const MEDICINE_REMINDER_LOG_MESSAGE =
   "\u0110\u00e3 g\u1eedi l\u1ec7nh nh\u1eafc u\u1ed1ng thu\u1ed1c cho Chami";
+const MEDICINE_REMINDER_ID = "medicine_morning";
+const DEFAULT_MEDICINE_REMINDER = {
+  medicineName: "Thuốc huyết áp",
+  time: "08:00",
+  timezone: "Asia/Tokyo",
+  repeat: "daily",
+  enabled: true,
+  targetDeviceId: "chami_001",
+};
+const MEDICINE_REMINDER_SENT_MESSAGE = "Đã gửi lời nhắc uống thuốc";
+const MEDICINE_REMINDER_TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+let latestMedicineReminder = null;
+let medicineReminderRequestRunning = false;
 
 function updateRobotSection(robot) {
   // Update overview cards
@@ -48,6 +64,16 @@ function updateDevicesSection(devices) {
 let latestBridgeRobot = null;
 let latestLegacyRobot = null;
 let latestSmartHomeDevices = [];
+let latestFallResponseCareEvents = [];
+let latestChamiAlertsForCareEventMapping = [];
+const mappedChamiEmergencyAlertIds = new Set();
+const duplicateCareEventLogIds = new Set();
+const invalidTimelineTimestampLogIds = new Set();
+const alertReceiveFallbackTimestamps = new Map();
+let fallResponseCareEventsLoaded = false;
+let fallTimelineLoadedLogged = false;
+let lastFallTimelineSignature = "";
+let lastMissingSafeFlowKey = "";
 
 function isBridgeChamiDevice(device) {
   return device?.id === "chami_001" || device?.type === "ai_robot";
@@ -440,6 +466,7 @@ renderDevices = function (devices) {
 function getAlertTypeLabel(type) {
   const labels = {
     fall_detected: "Phát hiện ngã",
+    emergency_response: "Phản hồi khẩn cấp",
     robot_offline: "Robot mất kết nối",
     low_battery: "Pin yếu",
     no_response: "Không phản hồi",
@@ -452,6 +479,7 @@ function getAlertTypeLabel(type) {
 function getAlertSourceLabel(source) {
   const labels = {
     camera_ai: "Camera AI",
+    fall_camera: "Fall Camera",
     chami_001: "Chami Robot",
     robot_chami: "Chami Robot",
     health_module: "Health Module",
@@ -475,7 +503,22 @@ function getLineStatusLabel(status) {
 
 function getTimeValue(value) {
   if (!value) return 0;
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : 0;
+  }
+  if (typeof value === "string" && /^\d+$/.test(value.trim())) {
+    const numericTimestamp = Number(value);
+    return Number.isFinite(numericTimestamp) ? numericTimestamp : 0;
+  }
   if (typeof value.toDate === "function") return value.toDate().getTime();
+  if (typeof value.toMillis === "function") return value.toMillis();
+  if (typeof value === "object") {
+    const seconds = value.seconds ?? value._seconds;
+    const nanoseconds = value.nanoseconds ?? value._nanoseconds ?? 0;
+    if (Number.isFinite(seconds)) {
+      return seconds * 1000 + Math.floor(nanoseconds / 1000000);
+    }
+  }
 
   const time = new Date(value).getTime();
   return Number.isNaN(time) ? 0 : time;
@@ -540,6 +583,726 @@ formatDateTime = function (value) {
 
   return date.toLocaleString("ja-JP");
 };
+
+function getMedicineReminderEls() {
+  return {
+    nameInput: document.getElementById("medicine-name-input"),
+    timeInput: document.getElementById("medicine-time-input"),
+    enabledInput: document.getElementById("medicine-enabled-input"),
+    saveButton: document.getElementById("medicine-reminder-save"),
+    nowButton: document.getElementById("medicine-reminder-now"),
+    status: document.getElementById("medicine-reminder-status"),
+    lastTriggered: document.getElementById("medicine-last-triggered"),
+  };
+}
+
+function setMedicineReminderStatus(message) {
+  const { status } = getMedicineReminderEls();
+  if (status) status.textContent = message || "";
+}
+
+function getMedicineReminderFormData() {
+  const { nameInput, timeInput, enabledInput } = getMedicineReminderEls();
+  const medicineName = (nameInput?.value || "").trim();
+  const time = (timeInput?.value || "").trim();
+
+  if (!medicineName) {
+    throw new Error("Tên thuốc không được rỗng");
+  }
+
+  if (!MEDICINE_REMINDER_TIME_RE.test(time)) {
+    throw new Error("Giờ uống phải đúng định dạng HH:mm");
+  }
+
+  return {
+    ...DEFAULT_MEDICINE_REMINDER,
+    medicineName,
+    time,
+    enabled: Boolean(enabledInput?.checked),
+  };
+}
+
+function renderMedicineReminder(reminder) {
+  const { nameInput, timeInput, enabledInput, lastTriggered } =
+    getMedicineReminderEls();
+  const data = reminder || DEFAULT_MEDICINE_REMINDER;
+  latestMedicineReminder = reminder || null;
+
+  if (nameInput) nameInput.value = data.medicineName || DEFAULT_MEDICINE_REMINDER.medicineName;
+  if (timeInput) timeInput.value = data.time || DEFAULT_MEDICINE_REMINDER.time;
+  if (enabledInput) enabledInput.checked = data.enabled !== false;
+  if (lastTriggered) {
+    lastTriggered.textContent = data.lastTriggeredAt
+      ? formatDateTime(data.lastTriggeredAt)
+      : "Chưa có";
+  }
+}
+
+async function saveMedicineReminderFromDashboard() {
+  const { saveButton } = getMedicineReminderEls();
+
+  try {
+    if (saveButton) saveButton.disabled = true;
+    const payload = getMedicineReminderFormData();
+    const saved = await FirebaseService.saveMedicineReminder(
+      payload,
+      MEDICINE_REMINDER_ID,
+    );
+    latestMedicineReminder = saved;
+    console.log("Dashboard: medicine reminder saved");
+    setMedicineReminderStatus("Đã lưu lịch nhắc thuốc");
+  } catch (error) {
+    console.error("Dashboard: medicine reminder save failed", error);
+    setMedicineReminderStatus("Không thể lưu lịch nhắc thuốc");
+  } finally {
+    if (saveButton) saveButton.disabled = false;
+  }
+}
+
+async function updateMedicineReminderEnabled(enabled) {
+  try {
+    await FirebaseService.setMedicineReminderEnabled(
+      enabled,
+      MEDICINE_REMINDER_ID,
+    );
+    console.log(
+      enabled
+        ? "Dashboard: medicine reminder enabled"
+        : "Dashboard: medicine reminder disabled",
+    );
+    setMedicineReminderStatus(enabled ? "Đã bật lịch nhắc thuốc" : "Lịch đang tắt");
+  } catch (error) {
+    console.error("Dashboard: medicine reminder enabled update failed", error);
+    setMedicineReminderStatus("Không thể lưu lịch nhắc thuốc");
+  }
+}
+
+async function createMedicineReminderNowCommand() {
+  if (medicineReminderRequestRunning) return;
+
+  const { nowButton } = getMedicineReminderEls();
+  medicineReminderRequestRunning = true;
+
+  try {
+    if (nowButton) nowButton.disabled = true;
+    const formData = getMedicineReminderFormData();
+    const medicineName =
+      latestMedicineReminder?.medicineName || formData.medicineName;
+    const result = await FirebaseService.createMedicineReminderCommand({
+      source: "dashboard",
+      targetDeviceId: "chami_001",
+      medicineName,
+    });
+
+    if (result?.skipped) {
+      setMedicineReminderStatus(
+        "Chami đã có yêu cầu nhắc thuốc đang chờ xử lý",
+      );
+      return;
+    }
+
+    console.log("Chami medicine reminder command created", {
+      id: result?.command?.id || null,
+      target: result?.command?.target || "chami_001",
+      action: result?.command?.action || "remind_medicine",
+      status: result?.command?.status || "pending",
+    });
+    setMedicineReminderStatus("Đã tạo yêu cầu nhắc ngay");
+  } catch (error) {
+    console.error("Failed to create Chami medicine reminder command", error);
+    setMedicineReminderStatus("Không thể tạo yêu cầu nhắc ngay");
+  } finally {
+    medicineReminderRequestRunning = false;
+    if (nowButton) nowButton.disabled = false;
+  }
+}
+
+function bindMedicineReminderDashboard() {
+  const { saveButton, nowButton, enabledInput } = getMedicineReminderEls();
+
+  renderMedicineReminder(latestMedicineReminder);
+  saveButton?.addEventListener("click", saveMedicineReminderFromDashboard);
+  nowButton?.addEventListener("click", createMedicineReminderNowCommand);
+  enabledInput?.addEventListener("change", (event) => {
+    updateMedicineReminderEnabled(event.target.checked);
+  });
+
+  if (typeof FirebaseService.listenMedicineReminder === "function") {
+    FirebaseService.listenMedicineReminder((reminder) => {
+      renderMedicineReminder(reminder);
+      if (reminder?.enabled === false) {
+        setMedicineReminderStatus("Lịch đang tắt");
+      }
+    }, MEDICINE_REMINDER_ID);
+  }
+}
+
+function normalizeTimelineText(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+function getTimelineTimestamp(item) {
+  const candidates = [
+    item?.createdAt,
+    item?.confirmedAt,
+    item?.updatedAt,
+    item?.observedAt,
+    item?.timelineFallbackAt,
+  ];
+
+  for (const candidate of candidates) {
+    const timestamp = getTimeValue(candidate);
+    if (timestamp > 0) return timestamp;
+  }
+
+  const logId = item?.id || item?.relatedAlertId || item?.type || "unknown";
+  if (!invalidTimelineTimestampLogIds.has(logId)) {
+    invalidTimelineTimestampLogIds.add(logId);
+    console.warn("Dashboard: Fall response timestamp parse failed", {
+      id: item?.id || null,
+      type: item?.type || null,
+      createdAt: item?.createdAt ?? null,
+    });
+  }
+
+  return 0;
+}
+
+function isChamiEmergencyAlert(alert) {
+  const source = alert?.source || alert?.deviceId || "";
+  return (
+    alert?.type === "emergency_response" &&
+    ["chami_001", "robot_chami", "chami"].includes(source) &&
+    (!alert?.level || ["danger", "emergency"].includes(alert.level))
+  );
+}
+
+function isNoResponseEmergencyAlert(alert) {
+  const message = normalizeTimelineText(alert?.message);
+  return (
+    isChamiEmergencyAlert(alert) &&
+    (message.includes("no_response") ||
+      message.includes("no response") ||
+      message.includes("khong co phan hoi"))
+  );
+}
+
+function formatFallTimelineTime(value) {
+  const timestamp = getTimeValue(value);
+  if (!timestamp) return "Đang chờ";
+
+  const date = new Date(timestamp);
+  const today = new Date();
+  const sameDay =
+    date.getFullYear() === today.getFullYear() &&
+    date.getMonth() === today.getMonth() &&
+    date.getDate() === today.getDate();
+
+  return date.toLocaleString("vi-VN", {
+    day: sameDay ? undefined : "2-digit",
+    month: sameDay ? undefined : "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+function createFallTimelineStep(step, index) {
+  const item = document.createElement("article");
+  item.className = `fall-response-step is-${step.status}`;
+  item.setAttribute("role", "listitem");
+
+  const marker = document.createElement("span");
+  marker.className = "fall-response-marker";
+  marker.textContent = String(index + 1);
+  marker.setAttribute("aria-hidden", "true");
+
+  const content = document.createElement("div");
+  content.className = "fall-response-step-content";
+
+  const title = document.createElement("strong");
+  title.textContent = step.title;
+
+  const time = document.createElement("time");
+  time.textContent = formatFallTimelineTime(step.time);
+
+  const detail = document.createElement("p");
+  detail.textContent = step.detail;
+
+  content.append(title, time, detail);
+  item.append(marker, content);
+  return item;
+}
+
+// Prefer persisted care_events; recent Chami alerts are the resilient fallback.
+function getRecentFallResponseCareEvents() {
+  const now = Date.now();
+  const cutoff = now - FALL_RESPONSE_EVENT_WINDOW_MS;
+
+  return (latestFallResponseCareEvents || [])
+    .filter((event) => {
+      const timestamp = getTimelineTimestamp(event);
+      return (
+        event?.flow === "fall_response" &&
+        timestamp >= cutoff &&
+        timestamp <= now + FALL_RESPONSE_CLOCK_SKEW_MS
+      );
+    })
+    .sort((a, b) => getTimelineTimestamp(a) - getTimelineTimestamp(b));
+}
+
+function getCareEventTitle(event) {
+  if (event?.type === "fall_confirmed") {
+    return "Camera phát hiện nguy cơ té ngã";
+  }
+
+  if (event?.type === "chami_command_sent") {
+    return "Đã yêu cầu Chami kiểm tra người dùng";
+  }
+
+  if (event?.type === "chami_alert_received") {
+    if (event.status === "no_response") {
+      return "Không có phản hồi sau thời gian chờ";
+    }
+
+    if (event.status === "danger") {
+      return "Đã gửi cảnh báo khẩn cấp cho người nhà";
+    }
+
+    if (event.status === "safe") {
+      return "Người dùng xác nhận an toàn";
+    }
+  }
+
+  return event?.message || "Sự kiện chăm sóc";
+}
+
+function getCareEventStatus(event) {
+  const status = event?.status || "warning";
+  if (["done", "active", "safe", "danger", "warning"].includes(status)) {
+    return status;
+  }
+
+  return status === "no_response" ? "danger" : "warning";
+}
+
+function selectLatestFallResponseFlow(events) {
+  if (!events.length) return [];
+
+  const latestEvent = events[events.length - 1];
+  let flowId = latestEvent.flowId || "";
+
+  if (!flowId) {
+    const latestTimestamp = getTimelineTimestamp(latestEvent);
+    const nearestFlowEvent = events
+      .slice(0, -1)
+      .reverse()
+      .find((event) => {
+        const timestamp = getTimelineTimestamp(event);
+        return (
+          event.flowId &&
+          timestamp <= latestTimestamp + FALL_RESPONSE_CLOCK_SKEW_MS &&
+          latestTimestamp - timestamp <= FALL_RESPONSE_EVENT_WINDOW_MS
+        );
+      });
+    flowId = nearestFlowEvent?.flowId || "";
+  }
+
+  if (!flowId) {
+    return [latestEvent];
+  }
+
+  const flowEvents = events.filter((event) => event.flowId === flowId);
+  const flowStart = getTimelineTimestamp(flowEvents[0]);
+  const flowEnd = flowStart + FALL_RESPONSE_EVENT_WINDOW_MS;
+
+  return events.filter((event) => {
+    const timestamp = getTimelineTimestamp(event);
+    return (
+      event.flowId === flowId ||
+      (!event.flowId && timestamp >= flowStart && timestamp <= flowEnd)
+    );
+  });
+}
+
+function buildCareEventFallResponseTimelineModel() {
+  const selectedEvents = selectLatestFallResponseFlow(
+    getRecentFallResponseCareEvents(),
+  );
+  if (!selectedEvents.length) return null;
+
+  const latestResult = selectedEvents
+    .slice()
+    .reverse()
+    .find(
+      (event) =>
+        event.type === "chami_alert_received" &&
+        ["safe", "danger", "no_response"].includes(event.status),
+    );
+  const hasFinalResult = Boolean(latestResult);
+  const steps = selectedEvents.slice(-5).map((event) => ({
+    id: event.id || `${event.type}_${getTimelineTimestamp(event)}`,
+    title: getCareEventTitle(event),
+    status: getCareEventStatus(event),
+    time: event.createdAt,
+    detail: event.detail || event.message || "",
+  }));
+
+  if (!hasFinalResult && steps.length < 5) {
+    steps.push({
+      id: "waiting_for_chami_result",
+      title: "Đang chờ kết quả từ Chami",
+      status: "active",
+      time: null,
+      detail: "Chưa có event safe, danger hoặc no_response cho flow này.",
+    });
+  }
+
+  let summary = "Đang xử lý";
+  let summaryStatus = "active";
+  if (latestResult?.status === "safe") {
+    summary = "An toàn";
+    summaryStatus = "safe";
+  } else if (latestResult?.status === "no_response") {
+    summary = "Không phản hồi";
+    summaryStatus = "danger";
+  } else if (latestResult?.status === "danger") {
+    summary = "Khẩn cấp";
+    summaryStatus = "danger";
+  }
+
+  const firstEvent = selectedEvents[0];
+  return {
+    flowKey:
+      firstEvent.flowId ||
+      `care_event:${firstEvent.id || getTimelineTimestamp(firstEvent)}`,
+    outcome: latestResult?.status || null,
+    summary,
+    summaryStatus,
+    steps,
+  };
+}
+
+function getLatestRecentChamiEmergencyAlert() {
+  const now = Date.now();
+  const emergencyAlerts = (latestChamiAlertsForCareEventMapping || []).filter(
+    isChamiEmergencyAlert,
+  );
+  const latestValidAlert = emergencyAlerts
+    .filter((alert) => {
+      const timestamp = getTimelineTimestamp(alert);
+      return (
+        timestamp >= now - FALL_RESPONSE_EVENT_WINDOW_MS &&
+        timestamp <= now + FALL_RESPONSE_CLOCK_SKEW_MS
+      );
+    })
+    .sort((a, b) => getTimelineTimestamp(b) - getTimelineTimestamp(a))[0];
+
+  if (latestValidAlert) return latestValidAlert;
+  if (!emergencyAlerts.length) return null;
+
+  const fallbackId = emergencyAlerts[0].id || "latest_emergency_alert";
+  if (!alertReceiveFallbackTimestamps.has(fallbackId)) {
+    alertReceiveFallbackTimestamps.set(fallbackId, now);
+  }
+  return {
+    ...emergencyAlerts[0],
+    timelineFallbackAt: alertReceiveFallbackTimestamps.get(fallbackId),
+  };
+}
+
+function buildAlertFallbackTimelineModel(alert) {
+  if (!alert) return null;
+
+  const noResponse = isNoResponseEmergencyAlert(alert);
+  const alertTime = alert.createdAt || alert.timelineFallbackAt;
+  const detail =
+    "Dữ liệu camera event chưa có trong care_events, timeline được dựng từ alert mới nhất.";
+  const resultTitle = noResponse
+    ? "Không có phản hồi sau thời gian chờ"
+    : "Người dùng cần trợ giúp";
+  const relatedAlertId =
+    alert.id || `chami_${getTimelineTimestamp(alert) || Date.now()}`;
+
+  return {
+    flowKey: `alert-fallback:${relatedAlertId}`,
+    outcome: noResponse ? "no_response" : "danger",
+    summary: noResponse ? "Không phản hồi" : "Khẩn cấp",
+    summaryStatus: "danger",
+    steps: [
+      {
+        id: `${relatedAlertId}_checking`,
+        title: "Chami đã hoàn tất kiểm tra",
+        status: "done",
+        time: alertTime,
+        detail,
+      },
+      {
+        id: `${relatedAlertId}_result`,
+        title: resultTitle,
+        status: "danger",
+        time: alertTime,
+        detail: alert.message || detail,
+      },
+      {
+        id: `${relatedAlertId}_family_alert`,
+        title: "Đã gửi cảnh báo khẩn cấp cho người nhà",
+        status: "danger",
+        time: alertTime,
+        detail,
+      },
+    ],
+  };
+}
+
+function isEmergencyAlertRepresentedInCareEvents(alert, careEvents) {
+  if (!alert) return false;
+
+  const relatedAlertId = alert.id || "";
+  const alertTimestamp = getTimelineTimestamp(alert);
+  return (careEvents || []).some((event) => {
+    if (
+      relatedAlertId &&
+      event.type === "chami_alert_received" &&
+      event.relatedAlertId === relatedAlertId
+    ) {
+      return true;
+    }
+
+    const eventTimestamp = getTimelineTimestamp(event);
+    return (
+      event.type === "chami_alert_received" &&
+      event.status ===
+        (isNoResponseEmergencyAlert(alert) ? "no_response" : "danger") &&
+      alertTimestamp > 0 &&
+      Math.abs(eventTimestamp - alertTimestamp) <= FALL_RESPONSE_CLOCK_SKEW_MS
+    );
+  });
+}
+
+function getFallResponseTimelineRenderData() {
+  const recentCareEvents = getRecentFallResponseCareEvents();
+  const careEventModel = buildCareEventFallResponseTimelineModel();
+  const latestAlert = getLatestRecentChamiEmergencyAlert();
+  const fallbackModel = buildAlertFallbackTimelineModel(latestAlert);
+
+  if (!careEventModel) {
+    return {
+      model: fallbackModel,
+      source: fallbackModel ? "alert_fallback" : "empty",
+      recentCareEventCount: recentCareEvents.length,
+      latestAlert,
+    };
+  }
+
+  if (latestAlert) {
+    const latestCareEventTimestamp = Math.max(
+      ...recentCareEvents.map(getTimelineTimestamp),
+    );
+    const latestAlertTimestamp = getTimelineTimestamp(latestAlert);
+    const alertIsRepresented = isEmergencyAlertRepresentedInCareEvents(
+      latestAlert,
+      recentCareEvents,
+    );
+
+    if (
+      !alertIsRepresented &&
+      latestAlertTimestamp >=
+        latestCareEventTimestamp - FALL_RESPONSE_CLOCK_SKEW_MS
+    ) {
+      return {
+        model: fallbackModel,
+        source: "alert_fallback",
+        recentCareEventCount: recentCareEvents.length,
+        latestAlert,
+      };
+    }
+  }
+
+  return {
+    model: careEventModel,
+    source: "care_events",
+    recentCareEventCount: recentCareEvents.length,
+    latestAlert,
+  };
+}
+
+function findNearestCareEventFlow(alertTimestamp) {
+  return getRecentFallResponseCareEvents()
+    .slice()
+    .reverse()
+    .find((event) => {
+      const timestamp = getTimelineTimestamp(event);
+      return (
+        event.flowId &&
+        ["fall_confirmed", "chami_command_sent"].includes(event.type) &&
+        timestamp <= alertTimestamp + FALL_RESPONSE_CLOCK_SKEW_MS &&
+        alertTimestamp - timestamp <= FALL_RESPONSE_EVENT_WINDOW_MS
+      );
+    });
+}
+
+async function mapChamiEmergencyAlertsToCareEvents(alerts) {
+  if (typeof FirebaseService.createCareEvent !== "function") {
+    console.warn("Dashboard: FirebaseService.createCareEvent is not available");
+    return;
+  }
+
+  const now = Date.now();
+  const emergencyAlerts = (alerts || []).filter(isChamiEmergencyAlert);
+  const recentAlerts = emergencyAlerts.filter((alert, index) => {
+    const timestamp = getTimelineTimestamp(alert);
+    if (!timestamp) return index === 0;
+    return (
+      timestamp >= now - FALL_RESPONSE_EVENT_WINDOW_MS &&
+      timestamp <= now + FALL_RESPONSE_CLOCK_SKEW_MS
+    );
+  });
+
+  for (const alert of recentAlerts) {
+    const relatedAlertId =
+      alert.id || `chami_${getTimelineTimestamp(alert) || Date.now()}`;
+    if (mappedChamiEmergencyAlertIds.has(relatedAlertId)) {
+      if (!duplicateCareEventLogIds.has(relatedAlertId)) {
+        duplicateCareEventLogIds.add(relatedAlertId);
+        console.log("Dashboard: care_event write skipped duplicate alert");
+      }
+      continue;
+    }
+
+    mappedChamiEmergencyAlertIds.add(relatedAlertId);
+    const noResponse = isNoResponseEmergencyAlert(alert);
+    const alertTimestamp = getTimelineTimestamp(alert) || Date.now();
+    const nearestFlow = findNearestCareEventFlow(alertTimestamp);
+
+    try {
+      const result = await FirebaseService.createCareEvent(
+        {
+          flow: "fall_response",
+          flowId: nearestFlow?.flowId || "",
+          source: "chami",
+          type: "chami_alert_received",
+          status: noResponse ? "no_response" : "danger",
+          message: noResponse
+            ? "Không có phản hồi sau thời gian chờ"
+            : "Người dùng cần trợ giúp",
+          detail: alert.message || "",
+          relatedAlertId,
+          cameraId: nearestFlow?.cameraId || "default_cam",
+          location: nearestFlow?.location || "living_room",
+          createdAt: getTimelineTimestamp(alert) ? alert.createdAt : undefined,
+        },
+        { eventId: `chami_alert_${relatedAlertId}` },
+      );
+
+      if (result?.created) {
+        console.log("Dashboard: Chami emergency alert mapped to timeline");
+      } else if (!duplicateCareEventLogIds.has(relatedAlertId)) {
+        duplicateCareEventLogIds.add(relatedAlertId);
+        console.log("Dashboard: care_event write skipped duplicate alert");
+      }
+    } catch (error) {
+      mappedChamiEmergencyAlertIds.delete(relatedAlertId);
+      console.warn(
+        "Dashboard: care_event write failed, using alert fallback",
+        error,
+      );
+    }
+  }
+}
+
+function updateFallResponseTimelineFromCareEvents() {
+  const timeline = document.getElementById("fall-response-timeline");
+  const summary = document.getElementById("fall-response-summary");
+  const note = document.getElementById("fall-response-note");
+  if (!timeline || !summary || !note) return;
+
+  if (fallResponseCareEventsLoaded && !fallTimelineLoadedLogged) {
+    fallTimelineLoadedLogged = true;
+    console.log("Dashboard: Fall response care events loaded");
+  }
+
+  const renderData = getFallResponseTimelineRenderData();
+  const { model, source, recentCareEventCount, latestAlert } = renderData;
+  const signature = model
+    ? JSON.stringify({
+        source,
+        flowKey: model.flowKey,
+        outcome: model.outcome,
+        steps: model.steps.map((step) => ({
+          id: step.id,
+          status: step.status,
+          time: getTimeValue(step.time),
+          title: step.title,
+        })),
+      })
+    : "empty";
+
+  if (signature === lastFallTimelineSignature) return;
+  lastFallTimelineSignature = signature;
+  console.debug("Dashboard: Fall response timeline debug", {
+    recentCareEventCount,
+    latestEmergencyAlert: latestAlert
+      ? {
+          id: latestAlert.id || null,
+          type: latestAlert.type || null,
+          level: latestAlert.level || null,
+          source: latestAlert.source || latestAlert.deviceId || null,
+          createdAt: latestAlert.createdAt || null,
+        }
+      : null,
+    renderSource: source,
+  });
+  timeline.replaceChildren();
+
+  if (!model) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    empty.textContent = "Chưa có sự kiện ngã gần đây";
+    timeline.appendChild(empty);
+    timeline.removeAttribute("role");
+    summary.className = "fall-response-summary is-empty";
+    summary.textContent = "Chưa có dữ liệu";
+    note.textContent =
+      "Kết quả an toàn chỉ hiển thị khi Chami gửi care event safe.";
+    console.log("Dashboard: No recent fall response timeline");
+    return;
+  }
+
+  timeline.setAttribute("role", "list");
+  model.steps.forEach((step, index) => {
+    timeline.appendChild(createFallTimelineStep(step, index));
+  });
+  summary.className = `fall-response-summary is-${model.summaryStatus}`;
+  summary.textContent = model.summary;
+
+  if (source === "alert_fallback") {
+    note.textContent =
+      "Đang dùng alert emergency_response mới nhất vì care_events chưa có event tương ứng.";
+  } else if (model.outcome === "safe") {
+    note.textContent = "Kết quả safe được xác nhận từ care_events.";
+  } else if (["danger", "no_response"].includes(model.outcome)) {
+    note.textContent =
+      "Kết quả khẩn cấp dùng đúng timestamp của alert Chami được ánh xạ vào care_events.";
+  } else {
+    note.textContent =
+      "Chưa có event safe, danger hoặc no_response; dashboard không tự suy diễn kết quả.";
+    if (lastMissingSafeFlowKey !== model.flowKey) {
+      lastMissingSafeFlowKey = model.flowKey;
+      console.log("Dashboard: Safe result log is not available yet");
+    }
+  }
+
+  if (source === "alert_fallback") {
+    console.log("Dashboard: Fall response timeline rendered from alert fallback");
+  } else {
+    console.log("Dashboard: Fall response timeline rendered from care_events");
+  }
+}
 
 function formatConfidence(value) {
   if (typeof value !== "number") return "N/A";
@@ -1006,11 +1769,19 @@ function renderCareLogs(logs) {
   visibleLogs.forEach((l) => {
     const item = document.createElement("div");
     item.className = "care-item";
+    const title =
+      l.type === "medicine_reminder_sent"
+        ? MEDICINE_REMINDER_SENT_MESSAGE
+        : l.type;
+    const detail =
+      l.type === "medicine_reminder_sent"
+        ? [l.medicineName, l.time, l.source].filter(Boolean).join(" / ")
+        : l.message || l.status;
     item.innerHTML = `
       <div class="timeline-dot"></div>
       <div class="timeline-content">
-        <strong>${l.type}</strong>
-        <small class="timeline-time">${l.message || l.status}</small>
+        <strong>${title}</strong>
+        <small class="timeline-time">${detail}</small>
       </div>
     `;
     el.appendChild(item);
@@ -1023,44 +1794,39 @@ async function handleMedicineReminderButtonClick() {
   console.log("Medicine button clicked - creating Chami command");
 
   try {
-    if (typeof FirebaseService.createRobotActionCommand !== "function") {
-      throw new Error("FirebaseService.createRobotActionCommand is unavailable");
+    if (typeof FirebaseService.createMedicineReminderCommand !== "function") {
+      throw new Error("FirebaseService.createMedicineReminderCommand is unavailable");
     }
 
-    const commandOptions = {
+    const result = await FirebaseService.createMedicineReminderCommand({
       source: "dashboard",
-      status: "pending",
-    };
-    const realtimeTimestamp = getRealtimeCommandTimestamp();
+      targetDeviceId: "chami_001",
+      medicineName:
+        latestMedicineReminder?.medicineName ||
+        DEFAULT_MEDICINE_REMINDER.medicineName,
+      text: MEDICINE_REMINDER_COMMAND_TEXT,
+      createdAt: getRealtimeCommandTimestamp(),
+    });
 
-    if (typeof realtimeTimestamp !== "undefined") {
-      commandOptions.createdAt = realtimeTimestamp;
+    if (result?.skipped) {
+      console.log("Medicine reminder command already pending for Chami");
+      setMedicineReminderStatus(
+        "Chami đã có yêu cầu nhắc thuốc đang chờ xử lý",
+      );
+      return;
     }
-
-    const command = await FirebaseService.createRobotActionCommand(
-      "chami_001",
-      "remind_medicine",
-      MEDICINE_REMINDER_COMMAND_TEXT,
-      commandOptions,
-    );
 
     console.log("Chami medicine reminder command created", {
-      id: command?.id || null,
-      target: command?.target || "chami_001",
-      type: command?.type || "robot_action",
-      action: command?.action || "remind_medicine",
-      status: command?.status || "pending",
+      id: result?.command?.id || null,
+      target: result?.command?.target || "chami_001",
+      type: result?.command?.type || "robot_action",
+      action: result?.command?.action || "remind_medicine",
+      status: result?.command?.status || "pending",
     });
-
-    await FirebaseService.createCareLog({
-      userId: "user01",
-      type: "medicine",
-      status: "sent",
-      message: MEDICINE_REMINDER_LOG_MESSAGE,
-      source: "dashboard",
-    });
+    setMedicineReminderStatus("Đã tạo yêu cầu nhắc ngay");
   } catch (error) {
     console.error("Failed to create Chami medicine reminder command", error);
+    setMedicineReminderStatus("Không thể tạo yêu cầu nhắc ngay");
   }
 }
 
@@ -1299,22 +2065,50 @@ if (typeof FirebaseService.subscribeToDevices === "function") {
 }
 
 if (typeof FirebaseService.subscribeToAlerts === "function") {
-  FirebaseService.subscribeToAlerts((data) => updateAlertsSection(data || []));
+  FirebaseService.subscribeToAlerts((data) => {
+    const alerts = data || [];
+    latestChamiAlertsForCareEventMapping = alerts;
+    updateAlertsSection(alerts);
+    updateFallResponseTimelineFromCareEvents();
+    mapChamiEmergencyAlertsToCareEvents(alerts);
+  });
 }
 
 if (typeof FirebaseService.subscribeToCareLogs === "function") {
-  FirebaseService.subscribeToCareLogs((data) =>
-    updateCareLogsSection(data || []),
-  );
+  FirebaseService.subscribeToCareLogs((data) => {
+    updateCareLogsSection(data || []);
+  });
+}
+
+if (typeof FirebaseService.subscribeToCareEvents === "function") {
+  FirebaseService.subscribeToCareEvents((data) => {
+    latestFallResponseCareEvents = data || [];
+    fallResponseCareEventsLoaded = true;
+    updateFallResponseTimelineFromCareEvents();
+    mapChamiEmergencyAlertsToCareEvents(latestChamiAlertsForCareEventMapping);
+  });
+} else {
+  fallResponseCareEventsLoaded = true;
+  updateFallResponseTimelineFromCareEvents();
+  console.warn("Dashboard: FirebaseService.subscribeToCareEvents is not available");
 }
 
 if (typeof FirebaseService.subscribeToCommands === "function") {
-  FirebaseService.subscribeToCommands((data) => renderCommands(data || []));
+  FirebaseService.subscribeToCommands((data) => {
+    const commands = data || [];
+    renderCommands(commands);
+  });
 }
 
 setInterval(refreshRobotPresenceDisplay, ROBOT_STATUS_REFRESH_INTERVAL_MS);
+// Re-evaluate the local 10-minute window without issuing any Firebase request.
+setInterval(
+  updateFallResponseTimelineFromCareEvents,
+  FALL_RESPONSE_TIMELINE_REFRESH_INTERVAL_MS,
+);
 
 setupResolvedFallHistoryToggle();
+bindMedicineReminderDashboard();
 subscribeToCameraDeviceStatus();
 subscribeToFallAlerts();
 

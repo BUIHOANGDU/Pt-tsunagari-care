@@ -13,7 +13,9 @@ const FirebaseService = (function () {
     devices: [],
     alerts: [],
     care_logs: [],
+    care_events: [],
     commands: [],
+    medicine_reminders: [],
   };
 
   const unsubscribes = {
@@ -21,8 +23,23 @@ const FirebaseService = (function () {
     devices: null,
     alerts: null,
     care_logs: null,
+    care_events: null,
     commands: null,
+    medicine_reminders: null,
   };
+  const DEFAULT_MEDICINE_REMINDER_ID = "medicine_morning";
+  const DEFAULT_MEDICINE_REMINDER = {
+    type: "medicine",
+    medicineName: "Thuốc huyết áp",
+    time: "08:00",
+    timezone: "Asia/Tokyo",
+    repeat: "daily",
+    enabled: true,
+    targetDeviceId: "chami_001",
+    lastTriggeredDate: null,
+    lastTriggeredAt: null,
+  };
+  const MEDICINE_TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
   const LEGACY_DEMO_MEDICINE_MESSAGE =
     "\u0110\u00e3 u\u1ed1ng thu\u1ed1c (demo)";
 
@@ -126,7 +143,9 @@ const FirebaseService = (function () {
       devices: "mock:devices",
       alerts: "mock:alerts",
       care_logs: "mock:care_logs",
+      care_events: "mock:care_events",
       commands: "mock:commands",
+      medicine_reminders: "mock:reminders",
     };
 
     const key = map[kind];
@@ -175,6 +194,7 @@ const FirebaseService = (function () {
         if (
           collection === "alerts" ||
           collection === "care_logs" ||
+          collection === "care_events" ||
           collection === "commands"
         ) {
           data = sortByCreatedAtDesc(data);
@@ -185,6 +205,9 @@ const FirebaseService = (function () {
 
       ref.on("value", handler, (err) => {
         console.warn("Realtime Database listener error", err);
+        if (collection === "care_events") {
+          listeners.care_events.forEach((fn) => fn([]));
+        }
       });
 
       unsubscribes[collection] = () => ref.off("value", handler);
@@ -225,8 +248,45 @@ const FirebaseService = (function () {
     return subscribeTo("care_logs", cb);
   }
 
+  function subscribeToCareEvents(cb) {
+    return subscribeTo("care_events", cb);
+  }
+
   function subscribeToCommands(cb) {
     return subscribeTo("commands", cb);
+  }
+
+  function listenMedicineReminder(
+    callback,
+    reminderId = DEFAULT_MEDICINE_REMINDER_ID,
+  ) {
+    listeners.medicine_reminders.push(callback);
+
+    if (useRealtime) {
+      const ref = db.ref(`reminders/${reminderId}`);
+      const handler = (snapshot) => {
+        const value = snapshot.val();
+        callback(value ? { id: reminderId, ...value } : null);
+      };
+
+      ref.on("value", handler, (err) => {
+        console.warn("Medicine reminder listener error", err);
+        callback(null);
+      });
+
+      return () => {
+        ref.off("value", handler);
+        const idx = listeners.medicine_reminders.indexOf(callback);
+        if (idx > -1) listeners.medicine_reminders.splice(idx, 1);
+      };
+    }
+
+    callback(getLocalMedicineReminder(reminderId));
+
+    return () => {
+      const idx = listeners.medicine_reminders.indexOf(callback);
+      if (idx > -1) listeners.medicine_reminders.splice(idx, 1);
+    };
   }
 
   // ---------- CRUD ----------
@@ -430,6 +490,214 @@ const FirebaseService = (function () {
     notifyLocal("care_logs");
   }
 
+  function getLocalMedicineReminder(reminderId = DEFAULT_MEDICINE_REMINDER_ID) {
+    const reminders = readLocal("mock:reminders") || {};
+    const reminder = reminders[reminderId];
+    return reminder ? { id: reminderId, ...reminder } : null;
+  }
+
+  function notifyLocalMedicineReminder(reminderId = DEFAULT_MEDICINE_REMINDER_ID) {
+    const reminder = getLocalMedicineReminder(reminderId);
+    listeners.medicine_reminders.forEach((cb) => cb(reminder));
+  }
+
+  function sanitizeMedicineReminderData(data = {}, existing = null) {
+    const medicineName =
+      typeof data.medicineName === "string" ? data.medicineName.trim() : "";
+    const time = typeof data.time === "string" ? data.time.trim() : "";
+
+    if (!medicineName) {
+      throw new Error("medicineName is required");
+    }
+
+    if (!MEDICINE_TIME_RE.test(time)) {
+      throw new Error("time must use HH:mm format");
+    }
+
+    const payload = {
+      type: "medicine",
+      medicineName,
+      time,
+      timezone:
+        typeof data.timezone === "string" && data.timezone.trim()
+          ? data.timezone.trim()
+          : DEFAULT_MEDICINE_REMINDER.timezone,
+      repeat: "daily",
+      enabled:
+        typeof data.enabled === "boolean"
+          ? data.enabled
+          : existing?.enabled ?? DEFAULT_MEDICINE_REMINDER.enabled,
+      targetDeviceId:
+        typeof data.targetDeviceId === "string" && data.targetDeviceId.trim()
+          ? data.targetDeviceId.trim()
+          : DEFAULT_MEDICINE_REMINDER.targetDeviceId,
+      lastTriggeredDate:
+        data.lastTriggeredDate ??
+        existing?.lastTriggeredDate ??
+        DEFAULT_MEDICINE_REMINDER.lastTriggeredDate,
+      lastTriggeredAt:
+        data.lastTriggeredAt ??
+        existing?.lastTriggeredAt ??
+        DEFAULT_MEDICINE_REMINDER.lastTriggeredAt,
+      updatedAt: realtimeServerTs(),
+    };
+
+    if (existing?.createdAt) {
+      payload.createdAt = existing.createdAt;
+    } else {
+      payload.createdAt = realtimeServerTs();
+    }
+
+    return Object.fromEntries(
+      Object.entries(payload).filter(([, value]) => value !== undefined),
+    );
+  }
+
+  async function getMedicineReminder(reminderId = DEFAULT_MEDICINE_REMINDER_ID) {
+    if (useRealtime) {
+      const data = await getRealtimeValue(`reminders/${reminderId}`);
+      return data ? { id: reminderId, ...data } : null;
+    }
+
+    return getLocalMedicineReminder(reminderId);
+  }
+
+  async function saveMedicineReminder(
+    data,
+    reminderId = DEFAULT_MEDICINE_REMINDER_ID,
+  ) {
+    const existing = await getMedicineReminder(reminderId);
+    const payload = sanitizeMedicineReminderData(data, existing);
+
+    if (useRealtime) {
+      await setRealtimeValue(`reminders/${reminderId}`, payload);
+      return { id: reminderId, ...payload };
+    }
+
+    const reminders = readLocal("mock:reminders") || {};
+    reminders[reminderId] = {
+      ...(existing || {}),
+      ...payload,
+      createdAt: existing?.createdAt || serverTs(),
+      updatedAt: serverTs(),
+    };
+    delete reminders[reminderId].id;
+    writeLocal("mock:reminders", reminders);
+    notifyLocalMedicineReminder(reminderId);
+    return { id: reminderId, ...reminders[reminderId] };
+  }
+
+  async function setMedicineReminderEnabled(
+    enabled,
+    reminderId = DEFAULT_MEDICINE_REMINDER_ID,
+  ) {
+    const existing = await getMedicineReminder(reminderId);
+    const base = existing || DEFAULT_MEDICINE_REMINDER;
+    return saveMedicineReminder({ ...base, enabled: Boolean(enabled) }, reminderId);
+  }
+
+  async function hasPendingMedicineReminderCommand(target = "chami_001") {
+    const commands = await listCommands();
+    return commands.some(
+      (command) =>
+        command?.target === target &&
+        command?.action === "remind_medicine" &&
+        (command?.status || "pending") === "pending",
+    );
+  }
+
+  async function createMedicineReminderCommand(options = {}) {
+    const target = options.targetDeviceId || options.target || "chami_001";
+
+    if (await hasPendingMedicineReminderCommand(target)) {
+      console.log("Medicine reminder command already pending for Chami");
+      return { skipped: true, reason: "pending_command" };
+    }
+
+    const medicineName =
+      typeof options.medicineName === "string" && options.medicineName.trim()
+        ? options.medicineName.trim()
+        : DEFAULT_MEDICINE_REMINDER.medicineName;
+    const text =
+      options.text || `Đã đến giờ uống thuốc: ${medicineName}`;
+
+    const command = await createRobotActionCommand(
+      target,
+      "remind_medicine",
+      text,
+      {
+        source: options.source || "dashboard",
+        status: "pending",
+        createdAt: options.createdAt || realtimeServerTs(),
+      },
+    );
+
+    return { skipped: false, command };
+  }
+
+  function sanitizeRealtimeKey(value) {
+    return String(value || "")
+      .replace(/[.#$\[\]\/]/g, "_")
+      .slice(0, 180);
+  }
+
+  async function createCareEvent(event, options = {}) {
+    const payload = {
+      flow: event.flow || "fall_response",
+      flowId: event.flowId || "",
+      source: event.source || "dashboard",
+      type: event.type || "unknown",
+      status: event.status || "warning",
+      message: event.message || "",
+      detail: event.detail || "",
+      relatedCommandId: event.relatedCommandId || "",
+      relatedAlertId: event.relatedAlertId || "",
+      cameraId: event.cameraId || "default_cam",
+      location: event.location || "living_room",
+      createdAt: event.createdAt || realtimeServerTs(),
+    };
+    const requestedId = sanitizeRealtimeKey(options.eventId || event.id);
+
+    if (useRealtime) {
+      if (requestedId) {
+        const ref = db.ref(`care_events/${requestedId}`);
+        const data = { id: requestedId, ...payload };
+        const result = await ref.transaction((current) => {
+          if (current !== null) return;
+          return data;
+        });
+        const stored = result.snapshot?.val() || data;
+        return {
+          event: { id: requestedId, ...stored },
+          created: result.committed,
+        };
+      }
+
+      const data = await pushRealtimeValue("care_events", payload);
+      return { event: data, created: true };
+    }
+
+    const arr = JSON.parse(localStorage.getItem("mock:care_events") || "[]");
+    const existing = requestedId
+      ? arr.find((item) => item.id === requestedId)
+      : payload.relatedAlertId
+        ? arr.find((item) => item.relatedAlertId === payload.relatedAlertId)
+        : null;
+
+    if (existing) {
+      return { event: existing, created: false };
+    }
+
+    const data = {
+      id: requestedId || `care_event_${Date.now()}`,
+      ...payload,
+    };
+    arr.unshift(data);
+    localStorage.setItem("mock:care_events", JSON.stringify(arr));
+    notifyLocal("care_events");
+    return { event: data, created: true };
+  }
+
   async function createAlert(alert) {
     const payload = {
       type: alert.type || "unknown_alert",
@@ -474,6 +742,16 @@ const FirebaseService = (function () {
     }
 
     return JSON.parse(localStorage.getItem("mock:care_logs") || "[]");
+  }
+
+  async function listCareEvents() {
+    if (useRealtime) {
+      return sortByCreatedAtDesc(
+        objectToArray(await getRealtimeValue("care_events")),
+      );
+    }
+
+    return JSON.parse(localStorage.getItem("mock:care_events") || "[]");
   }
 
   // ---------- Seed data ----------
@@ -711,20 +989,29 @@ const FirebaseService = (function () {
     subscribeToDevices,
     subscribeToAlerts,
     subscribeToCareLogs,
+    subscribeToCareEvents,
     subscribeToCommands,
+    listenMedicineReminder,
     getRobot,
     setRobot,
     listDevices,
     listCommands,
+    getMedicineReminder,
+    saveMedicineReminder,
+    setMedicineReminderEnabled,
+    hasPendingMedicineReminderCommand,
     updateCommandStatus,
     createCommand,
     createDeviceControlCommand,
     createRobotActionCommand,
+    createMedicineReminderCommand,
     createSmartHomeCommand,
     createCareLog,
+    createCareEvent,
     createAlert,
     listAlerts,
     listCareLogs,
+    listCareEvents,
     seedMockData,
   };
 })();
