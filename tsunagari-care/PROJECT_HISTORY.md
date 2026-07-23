@@ -1,5 +1,78 @@
 # Project History
 
+## 2026-07-24 00:26:42 +09:00
+
+### Muc tieu
+
+Debug Medication Reminder Scheduler tren Render bang code va log, bo sung log
+co kiem soat de xac dinh startup, RTDB, timezone, due check, transaction,
+pending command, command creation va care log.
+
+### File da sua
+
+- `server/index.js`
+- `server/lib/medicineReminderScheduler.js`
+- `PROJECT_HISTORY.md`
+
+### Ket qua dieu tra
+
+- `server/index.js` da import va goi `startMedicineReminderScheduler()` trong
+  callback `app.listen`; module-level guard dam bao scheduler chi start mot lan.
+- Code cu chi dung `setInterval(..., 60000)`, nen tick dau tien phai cho toi da
+  60 giay.
+- Helper timezone cu khong normalize ket qua hour `24` cua mot so Node/ICU
+  builds. Truong hop nay co the lam reminder `00:11` bi so sanh voi `24:11` va
+  khong duoc coi la due.
+- Log Render cu co Bridge API startup nhung khong co dong
+  `Medicine reminder scheduler started`, du code trong commit local co dong do.
+  Vi vay log cu chua chung minh process Render da chay dung source/commit nay.
+  Transaction va pending check chua the la nguyen nhan cua lan test do neu
+  scheduler chua co tick/due log.
+- Firebase Admin scheduler dung chung `getDb()` tu `server/firebaseAdmin.js`;
+  database duoc chon boi `FIREBASE_DATABASE_URL`. Code khong hard-code database
+  URL va khong log credential. Log moi chi hien database id an toan va can xac
+  nhan tren Render la `tsunagari-care-2026-default-rtdb`.
+
+### Sua loi va debug log
+
+- Them prefix `[MedicineScheduler]` cho log startup va moi tick.
+- Them initial tick ngay sau startup, co `catch` rieng de khong crash Bridge API.
+- Them log start requested, started interval, already-running guard va initial
+  tick scheduled.
+- Them log RTDB initialized, database id, reminder count va read failure.
+- Them log Tokyo date/time dang `YYYY-MM-DD HH:mm`; normalize `24:xx` thanh
+  `00:xx`.
+- Them log ngan gon cho tung medicine reminder va ly do skip:
+  disabled, invalid_time, invalid_repeat, invalid_target, time_not_due,
+  already_triggered_today va pending_command_exists.
+- Pending check chi chap nhan command co cung target, action
+  `remind_medicine` va status chinh xac `pending`; command khac va command done
+  khong chan.
+- Transaction kiem tra lai reminder hien tai va gio due truoc khi commit marker.
+  Log ro transaction start, committed, not committed va rollback.
+- Them command/care-log ids vao log sau khi ghi thanh cong; khong log payload,
+  secret, token, API key hay service account.
+
+### Lenh kiem tra va ket qua
+
+- `node --check server/index.js`: pass.
+- `node --check server/lib/medicineReminderScheduler.js`: pass.
+- `git diff --check`: pass; chi co canh bao LF/CRLF cua working copy.
+- Test formatter voi `2026-07-23T15:11:00.000Z`: tra
+  `2026-07-24 00:11` tai `Asia/Tokyo`.
+- Khong chay duoc helper bang `require()` trong workspace vi local
+  `node_modules/firebase-admin` chua ton tai. Khong co test Firebase production
+  hoac Chami trong buoc static check.
+
+### Gioi han van hanh
+
+- Render free instance co the sleep; scheduler chi chay khi Node process dang
+  thuc.
+- Scheduler khong nhac bu. Neu process thuc luc `00:12` cho reminder `00:11`,
+  reminder khong trigger. Can dat gio test sau khi service da live.
+- Can deploy commit moi va doc log de xac nhan RTDB, transaction, command,
+  care log va Chami end-to-end.
+
 ## 2026-07-23 23:50:57 +09:00
 
 ### Muc tieu lan sua

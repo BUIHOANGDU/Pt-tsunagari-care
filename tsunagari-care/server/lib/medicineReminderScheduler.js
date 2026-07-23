@@ -2,18 +2,57 @@ const { getDb, getServerTimestamp } = require("../firebaseAdmin");
 
 const DEFAULT_TIMEZONE = "Asia/Tokyo";
 const DEFAULT_TARGET_DEVICE_ID = "chami_001";
+const EXPECTED_DATABASE_ID = "tsunagari-care-2026-default-rtdb";
 const TICK_INTERVAL_MS = 60 * 1000;
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+const LOG_PREFIX = "[MedicineScheduler]";
 
 let medicineReminderSchedulerStarted = false;
 let medicineReminderSchedulerTimer = null;
+let rtdbInitializationLogged = false;
+
+function log(message) {
+  console.log(`${LOG_PREFIX} ${message}`);
+}
+
+function logError(message, error) {
+  const detail = error instanceof Error ? error.message : String(error);
+  console.error(`${LOG_PREFIX} ${message}: ${detail}`);
+}
+
+function getDatabaseId() {
+  try {
+    const hostname = new URL(process.env.FIREBASE_DATABASE_URL || "").hostname;
+    return hostname.split(".")[0] || "unknown";
+  } catch (_error) {
+    return "unknown";
+  }
+}
+
+function getSchedulerDb() {
+  const db = getDb();
+
+  if (!rtdbInitializationLogged) {
+    const databaseId = getDatabaseId();
+    log(`RTDB initialized database=${databaseId}`);
+    if (databaseId !== EXPECTED_DATABASE_ID) {
+      console.warn(
+        `${LOG_PREFIX} RTDB database mismatch expected=${EXPECTED_DATABASE_ID} actual=${databaseId}`,
+      );
+    }
+    rtdbInitializationLogged = true;
+  }
+
+  return db;
+}
 
 function getZonedDateTimeParts(date = new Date(), timezone = DEFAULT_TIMEZONE) {
   let formatter;
+  let normalizedTimezone = timezone || DEFAULT_TIMEZONE;
 
   try {
     formatter = new Intl.DateTimeFormat("en-CA", {
-      timeZone: timezone || DEFAULT_TIMEZONE,
+      timeZone: normalizedTimezone,
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
@@ -21,10 +60,11 @@ function getZonedDateTimeParts(date = new Date(), timezone = DEFAULT_TIMEZONE) {
       minute: "2-digit",
       hour12: false,
     });
-  } catch (error) {
-    console.warn("Medicine reminder timezone fallback: invalid timezone");
+  } catch (_error) {
+    normalizedTimezone = DEFAULT_TIMEZONE;
+    console.warn(`${LOG_PREFIX} invalid timezone; using ${DEFAULT_TIMEZONE}`);
     formatter = new Intl.DateTimeFormat("en-CA", {
-      timeZone: DEFAULT_TIMEZONE,
+      timeZone: normalizedTimezone,
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
@@ -37,27 +77,40 @@ function getZonedDateTimeParts(date = new Date(), timezone = DEFAULT_TIMEZONE) {
   const parts = Object.fromEntries(
     formatter.formatToParts(date).map((part) => [part.type, part.value]),
   );
+  // Some Node/ICU builds format midnight as 24:xx even with hour12 disabled.
+  const hour = parts.hour === "24" ? "00" : parts.hour;
 
   return {
     date: `${parts.year}-${parts.month}-${parts.day}`,
-    time: `${parts.hour}:${parts.minute}`,
+    time: `${hour}:${parts.minute}`,
+    timezone: normalizedTimezone,
   };
 }
 
-function isValidMedicineReminder(reminder) {
-  return (
-    reminder &&
-    reminder.type === "medicine" &&
-    reminder.enabled === true &&
-    reminder.repeat === "daily" &&
-    typeof reminder.targetDeviceId === "string" &&
-    reminder.targetDeviceId.trim() !== "" &&
-    TIME_RE.test(reminder.time || "")
-  );
+function getInvalidReason(reminder) {
+  if (!reminder || reminder.type !== "medicine") {
+    return "invalid_type";
+  }
+  if (reminder.enabled !== true) {
+    return "disabled";
+  }
+  if (!TIME_RE.test(reminder.time || "")) {
+    return "invalid_time";
+  }
+  if (reminder.repeat !== "daily") {
+    return "invalid_repeat";
+  }
+  if (
+    typeof reminder.targetDeviceId !== "string" ||
+    reminder.targetDeviceId.trim() === ""
+  ) {
+    return "invalid_target";
+  }
+  return null;
 }
 
 async function hasPendingMedicineReminderCommand(targetDeviceId) {
-  const snapshot = await getDb()
+  const snapshot = await getSchedulerDb()
     .ref("commands")
     .orderByChild("target")
     .equalTo(targetDeviceId)
@@ -66,23 +119,25 @@ async function hasPendingMedicineReminderCommand(targetDeviceId) {
   let hasPending = false;
   snapshot.forEach((childSnapshot) => {
     const command = childSnapshot.val();
-
     if (
-      command?.action === "remind_medicine" &&
-      (command.status || "pending") === "pending"
+      command?.target === targetDeviceId &&
+      command.action === "remind_medicine" &&
+      command.status === "pending"
     ) {
       hasPending = true;
     }
   });
 
+  log(`pending command check result=${hasPending}`);
   return hasPending;
 }
 
-async function createMedicineReminderCommand(reminder) {
+async function createMedicineReminderCommand(reminderId, reminder) {
   const target = reminder.targetDeviceId || DEFAULT_TARGET_DEVICE_ID;
-  const commandRef = getDb().ref("commands").push();
+  const commandRef = getSchedulerDb().ref("commands").push();
   const medicineName = reminder.medicineName || "Thuốc huyết áp";
 
+  log(`command create start id=${reminderId}`);
   await commandRef.set({
     id: commandRef.key,
     source: "medicine_scheduler",
@@ -93,13 +148,12 @@ async function createMedicineReminderCommand(reminder) {
     status: "pending",
     createdAt: getServerTimestamp(),
   });
-
-  console.log("Medicine reminder command created");
+  log(`command created commandId=${commandRef.key}`);
   return commandRef.key;
 }
 
 async function createMedicineReminderCareLog(reminder) {
-  const logRef = getDb().ref("care_logs").push();
+  const logRef = getSchedulerDb().ref("care_logs").push();
 
   await logRef.set({
     id: logRef.key,
@@ -112,8 +166,7 @@ async function createMedicineReminderCareLog(reminder) {
     status: "sent",
     createdAt: getServerTimestamp(),
   });
-
-  console.log("Medicine reminder care log created");
+  log(`care log created careLogId=${logRef.key}`);
 }
 
 async function rollbackReminderTriggerMarker(
@@ -121,86 +174,121 @@ async function rollbackReminderTriggerMarker(
   previousLastTriggeredDate,
   previousLastTriggeredAt,
 ) {
-  await getDb().ref(`reminders/${reminderId}`).update({
+  await getSchedulerDb().ref(`reminders/${reminderId}`).update({
     lastTriggeredDate: previousLastTriggeredDate ?? null,
     lastTriggeredAt: previousLastTriggeredAt ?? null,
     updatedAt: getServerTimestamp(),
   });
 }
 
-async function processDueReminder(reminderId, reminder, currentDate) {
+async function processDueReminder(reminderId, reminder, now, zonedNow) {
   const target = reminder.targetDeviceId || DEFAULT_TARGET_DEVICE_ID;
 
   if (await hasPendingMedicineReminderCommand(target)) {
-    console.log("Medicine reminder command already pending");
+    log(`skip id=${reminderId} reason=pending_command_exists`);
     return;
   }
 
   const previousLastTriggeredDate = reminder.lastTriggeredDate ?? null;
   const previousLastTriggeredAt = reminder.lastTriggeredAt ?? null;
-  const reminderRef = getDb().ref(`reminders/${reminderId}`);
+  const reminderRef = getSchedulerDb().ref(`reminders/${reminderId}`);
+  let transactionReason = "record_changed";
+
+  log(`transaction start id=${reminderId}`);
   const transactionResult = await reminderRef.transaction((current) => {
-    if (!isValidMedicineReminder(current)) {
+    const invalidReason = getInvalidReason(current);
+    if (invalidReason) {
+      transactionReason = invalidReason;
       return;
     }
 
-    if (current.lastTriggeredDate === currentDate) {
+    const currentZonedNow = getZonedDateTimeParts(
+      now,
+      current.timezone || DEFAULT_TIMEZONE,
+    );
+    if (
+      currentZonedNow.date !== zonedNow.date ||
+      currentZonedNow.time !== current.time
+    ) {
+      transactionReason = "time_not_due";
+      return;
+    }
+    if (current.lastTriggeredDate === currentZonedNow.date) {
+      transactionReason = "already_triggered_today";
       return;
     }
 
+    transactionReason = "committed";
     return {
       ...current,
-      lastTriggeredDate: currentDate,
+      lastTriggeredDate: currentZonedNow.date,
       lastTriggeredAt: Date.now(),
       updatedAt: Date.now(),
     };
   });
 
   if (!transactionResult.committed) {
-    console.log("Medicine reminder skipped: already triggered today");
+    log(
+      `transaction not committed id=${reminderId} reason=${transactionReason}`,
+    );
     return;
   }
 
+  log(`transaction committed id=${reminderId}`);
   const committedReminder = transactionResult.snapshot.val();
 
   try {
-    await createMedicineReminderCommand(committedReminder);
+    await createMedicineReminderCommand(reminderId, committedReminder);
     await createMedicineReminderCareLog(committedReminder);
   } catch (error) {
-    console.error("Medicine reminder command/care log error:", error);
+    logError(`command/care log failed id=${reminderId}`, error);
     try {
       await rollbackReminderTriggerMarker(
         reminderId,
         previousLastTriggeredDate,
         previousLastTriggeredAt,
       );
+      log(`transaction marker rolled back id=${reminderId}`);
     } catch (rollbackError) {
-      console.error("Medicine reminder rollback failed:", rollbackError);
+      logError(`transaction marker rollback failed id=${reminderId}`, rollbackError);
     }
   }
 }
 
 async function runMedicineReminderSchedulerTick(now = new Date()) {
-  console.log("Medicine reminder scheduler tick");
-  const snapshot = await getDb().ref("reminders").once("value");
+  log("tick start");
+  const tokyoNow = getZonedDateTimeParts(now, DEFAULT_TIMEZONE);
+  log(
+    `now timezone=${tokyoNow.timezone} date=${tokyoNow.date} time=${tokyoNow.time}`,
+  );
+  log(`timezone normalized date=${tokyoNow.date} time=${tokyoNow.time}`);
+
+  let snapshot;
+  try {
+    snapshot = await getSchedulerDb().ref("reminders").once("value");
+  } catch (error) {
+    logError("reminders read failed", error);
+    throw error;
+  }
+
   const reminders = snapshot.val() || {};
+  log(`reminders loaded count=${Object.keys(reminders).length}`);
 
   for (const [reminderId, reminder] of Object.entries(reminders)) {
     if (!reminder || reminder.type !== "medicine") {
       continue;
     }
 
-    if (reminder.enabled !== true) {
-      console.log("Medicine reminder skipped: disabled");
-      continue;
-    }
+    log(
+      `check id=${reminderId} enabled=${reminder.enabled === true} ` +
+        `repeat=${reminder.repeat || ""} reminderTime=${reminder.time || ""} ` +
+        `lastTriggeredDate=${reminder.lastTriggeredDate || ""} ` +
+        `target=${reminder.targetDeviceId || ""}`,
+    );
 
-    if (!TIME_RE.test(reminder.time || "")) {
-      console.log("Medicine reminder skipped: invalid time");
-      continue;
-    }
-
-    if (!isValidMedicineReminder(reminder)) {
+    const invalidReason = getInvalidReason(reminder);
+    if (invalidReason) {
+      log(`skip id=${reminderId} reason=${invalidReason}`);
       continue;
     }
 
@@ -208,38 +296,49 @@ async function runMedicineReminderSchedulerTick(now = new Date()) {
       now,
       reminder.timezone || DEFAULT_TIMEZONE,
     );
-
     if (zonedNow.time !== reminder.time) {
+      log(
+        `skip id=${reminderId} reason=time_not_due ` +
+          `now=${zonedNow.time} expected=${reminder.time}`,
+      );
       continue;
     }
-
     if (reminder.lastTriggeredDate === zonedNow.date) {
-      console.log("Medicine reminder skipped: already triggered today");
+      log(`skip id=${reminderId} reason=already_triggered_today`);
       continue;
     }
 
-    console.log(`Medicine reminder due: ${reminderId}`);
-    await processDueReminder(reminderId, reminder, zonedNow.date);
+    log(`due id=${reminderId}`);
+    await processDueReminder(reminderId, reminder, now, zonedNow);
   }
 }
 
+function runTickSafely(label) {
+  runMedicineReminderSchedulerTick().catch((error) => {
+    logError(`${label} tick failed`, error);
+  });
+}
+
 function startMedicineReminderScheduler() {
+  log("start requested");
   if (medicineReminderSchedulerStarted) {
+    log("start skipped: already running");
     return medicineReminderSchedulerTimer;
   }
 
   medicineReminderSchedulerStarted = true;
-  medicineReminderSchedulerTimer = setInterval(() => {
-    runMedicineReminderSchedulerTick().catch((error) => {
-      console.error("Medicine reminder scheduler error", error);
-    });
-  }, TICK_INTERVAL_MS);
+  medicineReminderSchedulerTimer = setInterval(
+    () => runTickSafely("interval"),
+    TICK_INTERVAL_MS,
+  );
 
   if (typeof medicineReminderSchedulerTimer.unref === "function") {
     medicineReminderSchedulerTimer.unref();
   }
 
-  console.log("Medicine reminder scheduler started");
+  log(`started intervalMs=${TICK_INTERVAL_MS}`);
+  log("initial tick scheduled");
+  runTickSafely("initial");
   return medicineReminderSchedulerTimer;
 }
 
