@@ -7,6 +7,9 @@ const debugRouter = require("./routes/debug");
 const chamiRouter = require("./routes/chami");
 const smartHomeRouter = require("./routes/smartHome");
 const robotRouter = require("./routes/robot");
+const {
+  startMedicineReminderScheduler,
+} = require("./lib/medicineReminderScheduler");
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -30,4 +33,5 @@ app.use("/api/robot", robotRouter);
 
 app.listen(port, () => {
   console.log(`Tsunagari Bridge API running on port ${port}`);
+  startMedicineReminderScheduler();
 });
