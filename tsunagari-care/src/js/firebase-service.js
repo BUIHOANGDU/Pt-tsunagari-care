@@ -75,6 +75,33 @@ const FirebaseService = (function () {
     return new Date().toISOString();
   }
 
+  function normalizeTimestamp(value) {
+    if (typeof value === "number") {
+      return Number.isFinite(value) && value > 0 ? value : 0;
+    }
+    if (typeof value === "string" && value.trim()) {
+      const text = value.trim();
+      const parsed = /^\d+$/.test(text) ? Number(text) : Date.parse(text);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+    }
+    if (value && typeof value.toMillis === "function") {
+      const millis = value.toMillis();
+      return Number.isFinite(millis) ? millis : 0;
+    }
+    if (value && typeof value.toDate === "function") {
+      const millis = value.toDate().getTime();
+      return Number.isFinite(millis) ? millis : 0;
+    }
+    if (value && typeof value === "object") {
+      const seconds = Number(value.seconds ?? value._seconds);
+      const nanoseconds = Number(value.nanoseconds ?? value._nanoseconds ?? 0);
+      if (Number.isFinite(seconds)) {
+        return seconds * 1000 + Math.floor(nanoseconds / 1000000);
+      }
+    }
+    return 0;
+  }
+
   function realtimeServerTs() {
     if (
       useRealtime &&
@@ -90,8 +117,12 @@ const FirebaseService = (function () {
 
   function sortByCreatedAtDesc(arr) {
     return arr.sort((a, b) => {
-      const ta = new Date(a.createdAt || a.updatedAt || 0).getTime();
-      const tb = new Date(b.createdAt || b.updatedAt || 0).getTime();
+      const ta = normalizeTimestamp(
+        a.createdAt || a.receivedAt || a.updatedAt || a.timestamp,
+      );
+      const tb = normalizeTimestamp(
+        b.createdAt || b.receivedAt || b.updatedAt || b.timestamp,
+      );
       return tb - ta;
     });
   }
@@ -246,6 +277,47 @@ const FirebaseService = (function () {
 
   function subscribeToCareLogs(cb) {
     return subscribeTo("care_logs", cb);
+  }
+
+  function listenMedicineCareLogs(callback, limit = 50) {
+    const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 200);
+    const isMedicineLog = (log) =>
+      log?.category === "medicine" ||
+      (typeof log?.type === "string" && log.type.startsWith("medicine_"));
+    const normalizeLogs = (logs) =>
+      sortByCreatedAtDesc(
+        (logs || []).filter(isMedicineLog).map((log) => ({
+          ...log,
+          timestamp: normalizeTimestamp(
+            log.createdAt || log.receivedAt || log.updatedAt,
+          ),
+        })),
+      );
+
+    if (useRealtime) {
+      const query = db
+        .ref("care_logs")
+        .orderByChild("type")
+        .startAt("medicine_")
+        .endAt("medicine_\uf8ff")
+        .limitToLast(safeLimit);
+      const handler = (snapshot) => {
+        callback(normalizeLogs(objectToArray(snapshot.val())));
+      };
+      query.on("value", handler, (error) => {
+        console.warn("Medicine care log listener error", error);
+        callback([]);
+      });
+      return () => query.off("value", handler);
+    }
+
+    const emit = (logs) => callback(normalizeLogs(logs).slice(0, safeLimit));
+    listeners.care_logs.push(emit);
+    emit(JSON.parse(localStorage.getItem("mock:care_logs") || "[]"));
+    return () => {
+      const index = listeners.care_logs.indexOf(emit);
+      if (index > -1) listeners.care_logs.splice(index, 1);
+    };
   }
 
   function subscribeToCareEvents(cb) {
@@ -474,6 +546,17 @@ const FirebaseService = (function () {
       source: log.source || "web_dashboard",
       createdAt: log.createdAt || serverTs(),
     };
+    [
+      "category",
+      "level",
+      "medicineName",
+      "reminderId",
+      "attempt",
+      "attempts",
+      "receivedAt",
+    ].forEach((field) => {
+      if (log[field] !== undefined) payload[field] = log[field];
+    });
 
     if (useRealtime) {
       await pushRealtimeValue("care_logs", payload);
@@ -708,6 +791,11 @@ const FirebaseService = (function () {
       lineStatus: alert.lineStatus || "sent",
       createdAt: alert.createdAt || serverTs(),
     };
+    ["medicineName", "reminderId", "attempt", "attempts", "receivedAt"].forEach(
+      (field) => {
+        if (alert[field] !== undefined) payload[field] = alert[field];
+      },
+    );
 
     if (useRealtime) {
       await pushRealtimeValue("alerts", payload);
@@ -989,6 +1077,7 @@ const FirebaseService = (function () {
     subscribeToDevices,
     subscribeToAlerts,
     subscribeToCareLogs,
+    listenMedicineCareLogs,
     subscribeToCareEvents,
     subscribeToCommands,
     listenMedicineReminder,
@@ -1012,6 +1101,7 @@ const FirebaseService = (function () {
     listAlerts,
     listCareLogs,
     listCareEvents,
+    normalizeTimestamp,
     seedMockData,
   };
 })();

@@ -35,7 +35,13 @@ const DEFAULT_MEDICINE_REMINDER = {
 };
 const MEDICINE_REMINDER_SENT_MESSAGE = "Đã gửi lời nhắc uống thuốc";
 const MEDICINE_REMINDER_TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+const MEDICINE_CARE_TYPES = new Set([
+  "medicine_reminder_sent",
+  "medicine_taken",
+  "medicine_no_response",
+]);
 let latestMedicineReminder = null;
+let latestMedicineCareLogs = [];
 let medicineReminderRequestRunning = false;
 
 function updateRobotSection(robot) {
@@ -471,6 +477,8 @@ function getAlertTypeLabel(type) {
     low_battery: "Pin yếu",
     no_response: "Không phản hồi",
     medicine_missed: "Chưa uống thuốc",
+    medicine_taken: "Đã uống thuốc",
+    medicine_no_response: "Không phản hồi nhắc thuốc",
   };
 
   return labels[type] || type || "Cảnh báo";
@@ -522,6 +530,87 @@ function getTimeValue(value) {
 
   const time = new Date(value).getTime();
   return Number.isNaN(time) ? 0 : time;
+}
+
+function formatMedicineTime(value) {
+  const timestamp = getTimeValue(value);
+  if (!timestamp) return "--:--";
+  return new Date(timestamp).toLocaleTimeString("vi-VN", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function isValidMedicineCareLog(log) {
+  if (!log || !MEDICINE_CARE_TYPES.has(log.type)) return false;
+  const timestamp = getTimeValue(
+    log.createdAt || log.receivedAt || log.updatedAt,
+  );
+  if (!timestamp) {
+    console.warn("Dashboard: invalid medicine care log skipped");
+    return false;
+  }
+  if (
+    log.type === "medicine_taken" &&
+    (!Number.isInteger(log.attempt) || log.attempt < 1 || log.attempt > 3)
+  ) {
+    console.warn("Dashboard: invalid medicine care log skipped");
+    return false;
+  }
+  return true;
+}
+
+function getMedicineCarePresentation(log) {
+  const medicineName =
+    log.medicineName ||
+    latestMedicineReminder?.medicineName ||
+    DEFAULT_MEDICINE_REMINDER.medicineName;
+  const time = formatMedicineTime(log.createdAt || log.receivedAt);
+  const demoLabel = log.source === "demo" ? "Demo" : "";
+
+  if (log.type === "medicine_taken") {
+    return {
+      title: "Đã uống thuốc",
+      detail: `${medicineName} • xác nhận ở lần ${log.attempt} • ${time}`,
+      badge: "Confirmed",
+      status: "confirmed",
+      cardText: `Đã uống lúc ${time}`,
+      cardDetail: `Xác nhận lần ${log.attempt}`,
+      demoLabel,
+    };
+  }
+  if (log.type === "medicine_no_response") {
+    const attempts = Number.isInteger(log.attempts) ? log.attempts : 3;
+    return {
+      title: `Không phản hồi sau ${attempts} lần nhắc`,
+      detail: `${medicineName} • ${time}`,
+      badge: "No response",
+      status: "no-response",
+      cardText: `Không phản hồi lúc ${time}`,
+      cardDetail: `Sau ${attempts} lần nhắc`,
+      demoLabel,
+    };
+  }
+  return {
+    title: MEDICINE_REMINDER_SENT_MESSAGE,
+    detail: `${medicineName} • ${time}`,
+    badge: "Sent",
+    status: "sent",
+    cardText: `Đã gửi lúc ${time}`,
+    cardDetail: "",
+    demoLabel,
+  };
+}
+
+function renderLatestMedicineFollowup() {
+  const latest = latestMedicineCareLogs[0];
+  if (!latest) return;
+  const presentation = getMedicineCarePresentation(latest);
+  const lastTriggered = document.getElementById("medicine-last-triggered");
+  const detail = document.getElementById("medicine-last-triggered-detail");
+  if (lastTriggered) lastTriggered.textContent = presentation.cardText;
+  if (detail) detail.textContent = presentation.cardDetail;
+  console.log(`Dashboard: medicine follow-up rendered type=${latest.type}`);
 }
 
 function sortByNewest(items, getTimestamp) {
@@ -636,6 +725,7 @@ function renderMedicineReminder(reminder) {
       ? formatDateTime(data.lastTriggeredAt)
       : "Chưa có";
   }
+  renderLatestMedicineFollowup();
 }
 
 async function saveMedicineReminderFromDashboard() {
@@ -1704,7 +1794,8 @@ renderAlerts = function (alerts) {
     return;
   }
 
-  const isNewAlert = (alert) => alert?.status === "new";
+  const isNewAlert = (alert) =>
+    alert?.status === "new" || MEDICINE_CARE_TYPES.has(alert?.type);
   const isDangerOrSosAlert = (alert) =>
     alert?.level === "danger" || alert?.type === "sos";
 
@@ -1725,11 +1816,32 @@ renderAlerts = function (alerts) {
 
   selectedAlerts.forEach((a) => {
     const row = document.createElement("div");
-    row.className = `alert-item alert-${a.level || "warning"}`;
+    const medicationClass =
+      a.type === "medicine_taken"
+        ? "alert-success"
+        : a.type === "medicine_no_response"
+          ? "alert-warning"
+          : `alert-${a.level || "warning"}`;
+    row.className = `alert-item ${medicationClass}`;
+
+    const medicineDetail =
+      a.type === "medicine_taken"
+        ? [a.medicineName, a.attempt ? `lần ${a.attempt}` : ""]
+            .filter(Boolean)
+            .join(" • ")
+        : a.type === "medicine_no_response"
+          ? [
+              a.medicineName,
+              a.attempts ? `${a.attempts} lần nhắc` : "",
+            ]
+              .filter(Boolean)
+              .join(" • ")
+          : "";
 
     const meta = [
       formatDateTime(a.createdAt),
       getAlertSourceLabel(a.source),
+      medicineDetail,
       a.lineStatus ? getLineStatusLabel(a.lineStatus) : "",
     ].filter(Boolean);
 
@@ -1754,7 +1866,11 @@ function renderCareLogs(logs) {
   const el = document.getElementById("care-logs");
   el.innerHTML = "";
   const validLogs = sortByNewest(
-    (logs || []).filter((log) => !isLegacyDemoMedicineLog(log)),
+    (logs || []).filter(
+      (log) =>
+        !isLegacyDemoMedicineLog(log) &&
+        (!MEDICINE_CARE_TYPES.has(log?.type) || isValidMedicineCareLog(log)),
+    ),
     (log) => getTimeValue(log.createdAt),
   );
   const visibleLogs = validLogs.slice(0, CARE_LOG_DISPLAY_LIMIT);
@@ -1769,72 +1885,42 @@ function renderCareLogs(logs) {
   visibleLogs.forEach((l) => {
     const item = document.createElement("div");
     item.className = "care-item";
-    const title =
-      l.type === "medicine_reminder_sent"
-        ? MEDICINE_REMINDER_SENT_MESSAGE
-        : l.type;
-    const detail =
-      l.type === "medicine_reminder_sent"
-        ? [l.medicineName, l.time, l.source].filter(Boolean).join(" / ")
-        : l.message || l.status;
-    item.innerHTML = `
-      <div class="timeline-dot"></div>
-      <div class="timeline-content">
-        <strong>${title}</strong>
-        <small class="timeline-time">${detail}</small>
-      </div>
-    `;
+    const isMedicine = MEDICINE_CARE_TYPES.has(l.type);
+    const presentation = isMedicine ? getMedicineCarePresentation(l) : null;
+    if (isMedicine) item.classList.add(`medicine-${presentation.status}`);
+
+    const dot = document.createElement("div");
+    dot.className = "timeline-dot";
+    const content = document.createElement("div");
+    content.className = "timeline-content";
+    const heading = document.createElement("div");
+    heading.className = "care-item-heading";
+    const title = document.createElement("strong");
+    title.textContent = presentation?.title || l.type;
+    heading.appendChild(title);
+
+    if (presentation) {
+      const badge = document.createElement("span");
+      badge.className = `medicine-status-badge is-${presentation.status}`;
+      badge.textContent = presentation.badge;
+      heading.appendChild(badge);
+      if (presentation.demoLabel) {
+        const demo = document.createElement("span");
+        demo.className = "medicine-demo-label";
+        demo.textContent = presentation.demoLabel;
+        heading.appendChild(demo);
+      }
+    }
+
+    const detail = document.createElement("small");
+    detail.className = "timeline-time";
+    detail.textContent = presentation?.detail || l.message || l.status || "";
+    content.append(heading, detail);
+    item.append(dot, content);
     el.appendChild(item);
   });
 
   appendCompactMore(el, hiddenCount, "hoạt động cũ hơn");
-}
-
-async function handleMedicineReminderButtonClick() {
-  console.log("Medicine button clicked - creating Chami command");
-
-  try {
-    if (typeof FirebaseService.createMedicineReminderCommand !== "function") {
-      throw new Error("FirebaseService.createMedicineReminderCommand is unavailable");
-    }
-
-    const result = await FirebaseService.createMedicineReminderCommand({
-      source: "dashboard",
-      targetDeviceId: "chami_001",
-      medicineName:
-        latestMedicineReminder?.medicineName ||
-        DEFAULT_MEDICINE_REMINDER.medicineName,
-      text: MEDICINE_REMINDER_COMMAND_TEXT,
-      createdAt: getRealtimeCommandTimestamp(),
-    });
-
-    if (result?.skipped) {
-      console.log("Medicine reminder command already pending for Chami");
-      setMedicineReminderStatus(
-        "Chami đã có yêu cầu nhắc thuốc đang chờ xử lý",
-      );
-      return;
-    }
-
-    console.log("Chami medicine reminder command created", {
-      id: result?.command?.id || null,
-      target: result?.command?.target || "chami_001",
-      type: result?.command?.type || "robot_action",
-      action: result?.command?.action || "remind_medicine",
-      status: result?.command?.status || "pending",
-    });
-    setMedicineReminderStatus("Đã tạo yêu cầu nhắc ngay");
-  } catch (error) {
-    console.error("Failed to create Chami medicine reminder command", error);
-    setMedicineReminderStatus("Không thể tạo yêu cầu nhắc ngay");
-  }
-}
-
-function bindMedicineReminderButtonHandler() {
-  const button = document.getElementById("demo-medicine-done");
-  if (!button) return;
-
-  button.onclick = handleMedicineReminderButtonClick;
 }
 
 // Commands UI
@@ -1905,24 +1991,39 @@ document
     renderCommands(cmds);
   });
 
+async function createDemoMedicineEvent(type) {
+  const medicineName =
+    latestMedicineReminder?.medicineName ||
+    DEFAULT_MEDICINE_REMINDER.medicineName;
+  const createdAt = new Date().toISOString();
+  const confirmed = type === "medicine_taken";
+  const event = {
+    type,
+    category: "medicine",
+    source: "demo",
+    status: confirmed ? "confirmed" : "no_response",
+    level: confirmed ? "info" : "warning",
+    attempt: confirmed ? 2 : undefined,
+    attempts: confirmed ? null : 3,
+    medicineName,
+    reminderId: MEDICINE_REMINDER_ID,
+    message: confirmed
+      ? "Người dùng đã xác nhận uống thuốc"
+      : "Không có phản hồi sau 3 lần nhắc uống thuốc",
+    createdAt,
+  };
+
+  await FirebaseService.createCareLog(event);
+  await FirebaseService.createAlert(event);
+  console.log(`Dashboard: demo medicine event created type=${type}`);
+}
+
 // bind buttons (demo actions)
 document.getElementById("btn-medicine-done").onclick = async () => {
-  await FirebaseService.createCareLog({
-    userId: "user01",
-    type: "medicine",
-    status: "done",
-    message: "Đã uống thuốc buổi sáng",
-    source: "web_dashboard",
-  });
+  await createDemoMedicineEvent("medicine_taken");
 };
 document.getElementById("btn-medicine-missed").onclick = async () => {
-  await FirebaseService.createCareLog({
-    userId: "user01",
-    type: "medicine",
-    status: "missed",
-    message: "Chưa uống thuốc",
-    source: "web_dashboard",
-  });
+  await createDemoMedicineEvent("medicine_no_response");
 };
 document.getElementById("btn-ate").onclick = async () => {
   await FirebaseService.createCareLog({
@@ -1987,47 +2088,10 @@ document.getElementById("demo-fall").onclick = async () => {
   });
 };
 document.getElementById("demo-medicine-done").onclick = async () => {
-  return handleMedicineReminderButtonClick();
-
-  try {
-    const command = await FirebaseService.createRobotActionCommand(
-      "chami_001",
-      "remind_medicine",
-      "Nhắc người dùng uống thuốc",
-      {
-        source: "dashboard",
-      },
-    );
-
-    console.log("Chami medicine reminder command created", {
-      id: command?.id || null,
-      target: command?.target || "chami_001",
-      action: command?.action || "remind_medicine",
-      status: command?.status || "pending",
-    });
-
-    await FirebaseService.createCareLog({
-      userId: "user01",
-      type: "medicine",
-      status: "sent",
-      message: "Đã gửi lệnh nhắc uống thuốc cho Chami",
-      source: "dashboard",
-    });
-  } catch (error) {
-    console.error("Failed to create Chami medicine reminder command", error);
-  }
+  await createDemoMedicineEvent("medicine_taken");
 };
-bindMedicineReminderButtonHandler();
-setTimeout(bindMedicineReminderButtonHandler, 0);
-window.addEventListener("load", bindMedicineReminderButtonHandler);
 document.getElementById("demo-no-response").onclick = async () => {
-  await FirebaseService.createCareLog({
-    userId: "user01",
-    type: "response",
-    status: "no_response",
-    message: "Không phản hồi (demo)",
-    source: "demo",
-  });
+  await createDemoMedicineEvent("medicine_no_response");
 };
 document.getElementById("demo-toggle-light").onclick = async () => {
   const button = document.getElementById("demo-toggle-light");
@@ -2078,6 +2142,19 @@ if (typeof FirebaseService.subscribeToCareLogs === "function") {
   FirebaseService.subscribeToCareLogs((data) => {
     updateCareLogsSection(data || []);
   });
+}
+
+if (typeof FirebaseService.listenMedicineCareLogs === "function") {
+  FirebaseService.listenMedicineCareLogs((data) => {
+    latestMedicineCareLogs = sortByNewest(
+      (data || []).filter(isValidMedicineCareLog),
+      (log) => getTimeValue(log.createdAt || log.receivedAt),
+    );
+    console.log(
+      `Dashboard: medicine care logs loaded count=${latestMedicineCareLogs.length}`,
+    );
+    renderLatestMedicineFollowup();
+  }, 50);
 }
 
 if (typeof FirebaseService.subscribeToCareEvents === "function") {

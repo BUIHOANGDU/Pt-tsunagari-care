@@ -1,5 +1,157 @@
 # Project History
 
+## 2026-07-25 01:31:20 +09:00
+
+### Muc tieu
+
+Hoan thien Medication Follow-up end-to-end tu event that cua Chami qua backend,
+RTDB alert/care log va dashboard, khong suy dien `medicine_taken` tu scheduler.
+
+### File da sua
+
+- `server/routes/chami.js`
+- `src/js/firebase-service.js`
+- `src/js/dashboard.js`
+- `index.html`
+- `src/css/style.css`
+- `PROJECT_HISTORY.md`
+
+### Backend payload va validation
+
+- Nguyen nhan metadata cu bi mat: route `/api/chami/alert` chi lay
+  `source/type/level/message`, bo attempt/attempts/medicine metadata va hard-code
+  `status=new`.
+- Them nhanh rieng cho `medicine_taken` va `medicine_no_response`; alert cu van
+  dung cung URL va schema tuong thich.
+- Whitelist/sanitize type, source, level, status, message, attempt/attempts,
+  medicineName, reminderId va createdAt. Khong ghi raw payload, client id hoac
+  client server timestamp.
+- `medicine_taken` bat buoc attempt integer 1..3, status normalized confirmed,
+  level mac dinh info.
+- `medicine_no_response` attempts integer 1..3 (mac dinh 3), status
+  no_response, level mac dinh warning.
+- medicineName trim/gioi han 100 ky tu, fallback tu
+  `reminders/{reminderId}/medicineName`, sau do fallback `Thuoc`.
+- reminderId mac dinh `medicine_morning`, chi nhan ky tu an toan.
+- createdAt chap nhan number, numeric string, ISO va Timestamp-like object;
+  thieu timestamp thi luu Firebase server timestamp. receivedAt luon server
+  timestamp.
+- Payload medicine khong hop le tra HTTP 400 va khong ghi RTDB.
+
+### Alert, care log va dedupe
+
+- Event hop le ghi cung metadata bang mot RTDB multipath update vao:
+  `alerts/{alertId}` va `care_logs/{careLogId}`.
+- Care log co `category=medicine`; alert khong them category de giu schema cu.
+- Dedupe transaction tai `care_event_dedup/{dedupeKey}`.
+- Uu tien eventId hop le; neu khong co thi SHA-256 cua
+  type/source/reminderId/attempt-or-attempts/createdAt normalized.
+- Firmware hien tai co the khong gui createdAt; fallback dedupe theo ngay UTC
+  nhan event. Cach nay chan retry trong ngay cho reminder daily, nhung eventId
+  van la lua chon chinh xac nhat neu sau nay firmware bo sung.
+- Duplicate tra `{ ok: true, duplicate: true }`, khong tao alert/care log moi.
+- Neu multipath write loi sau lock, backend rollback dedupe marker va log loi.
+- Dedupe records can chinh sach retention/cleanup trong mot buoc sau.
+
+### FirebaseService va dashboard
+
+- Them `normalizeTimestamp()` cho number, numeric string, ISO,
+  Firebase Timestamp-like object va server timestamp da resolve.
+- Them `listenMedicineCareLogs(callback, limit=50)` voi RTDB query gioi han theo
+  prefix type `medicine_`, sort moi nhat truoc.
+- `createCareLog` va `createAlert` giu medicine metadata cho demo.
+- Care timeline toi da 3 dong, render:
+  Sent / `Da gui loi nhac uong thuoc`;
+  Confirmed / `Da uong thuoc` va attempt;
+  No response / so lan nhac.
+- Card `Lan nhac gan nhat` dung event medicine moi nhat de hien sent/taken/no
+  response, khong sua reminder schedule data.
+- Alert Center render medicine_taken bang success/info va
+  medicine_no_response bang warning; emergency/fall logic khong bi doi.
+- Demo `Da uong thuoc` va `Khong phan hoi` tao care log + alert source demo,
+  khong tao command, khong goi firmware va khong cap nhat lastTriggeredDate.
+- Loai bo legacy binder tung ghi de nut demo thanh command `remind_medicine`.
+
+### Backward compatibility
+
+- Khong sua firmware, scheduler timing/schema command, Firebase config/rules,
+  server index hoac route URL.
+- Alert legacy fallback status new va van ghi alerts.
+- Khong sua emergency_check, fall timeline, smart-home, robot status, command
+  queue hoac nut `Nhac ngay` trong card lich.
+
+### Checks va test
+
+- `node --check server/routes/chami.js`: pass.
+- `node --check src/js/firebase-service.js`: pass.
+- `node --check src/js/dashboard.js`: pass.
+- `node --check server/index.js`: pass.
+- `git diff --check`: pass; chi co canh bao LF/CRLF working copy.
+- Project khong co test script ngoai `bridge`; local node_modules khong ton tai,
+  nen khong khoi dong Express/Firebase Admin integration test tai may nay.
+- Chua test end-to-end voi Render, RTDB production va firmware that.
+
+### Test thu cong va next steps
+
+1. Deploy lai Render vi route backend da thay doi.
+2. Gui medicine_taken hop le va xac nhan alert + care log cung metadata,
+   dashboard hien confirmed attempt.
+3. Gui medicine_no_response va xac nhan warning, khong co medicine_taken.
+4. Retry cung event hai lan; lan hai phai duplicate=true va khong tang record.
+5. Gui medicine_taken thieu attempt; phai HTTP 400, khong ghi.
+6. Gui emergency_response cu; Alert Center va fall timeline phai van dung.
+7. Bam hai nut demo; xac nhan source demo va commands khong thay doi.
+8. Khong can flash firmware lai cho thay doi backend/dashboard nay.
+- Khong ghi secret, token, API key hoac service account.
+
+## 2026-07-24 01:09:47 +09:00
+
+### Muc tieu
+
+Sua loi Medication Reminder Scheduler abort duplicate-lock transaction voi
+`reason=invalid_type` tren Render.
+
+### Nguyen nhan
+
+- Scheduler da doc va validate reminder hop le, xac dinh reminder due va pending
+  command la false.
+- Code cu transaction tren toan record `reminders/{reminderId}` va validate lai
+  `current` trong callback.
+- Firebase Realtime Database co the goi transaction callback lan dau voi
+  `current=null` khi local cache chua co record. `getInvalidReason(null)` tra
+  `invalid_type`, callback return `undefined` va transaction bi abort.
+
+### File da sua
+
+- `server/lib/medicineReminderScheduler.js`
+- `PROJECT_HISTORY.md`
+
+### Cach sua
+
+- Giu validation reminder snapshot truoc transaction: type, enabled, repeat,
+  dinh dang time, target, gio due va last-triggered date.
+- Chuyen duplicate lock sang transaction child path
+  `reminders/{reminderId}/lastTriggeredDate`.
+- Callback chap nhan `currentDate=null` va return ngay Tokyo hien tai de commit.
+  Callback chi return `undefined` khi child da bang ngay hom nay; khong return
+  `null` va khong transaction/xoa toan reminder record.
+- Sau commit, update `lastTriggeredAt` va `updatedAt` bang Firebase server
+  timestamp, sau do tao `remind_medicine` command va care log.
+- Neu timestamp, command hoac care log loi, rollback `lastTriggeredDate` va
+  `lastTriggeredAt` ve gia tri snapshot truoc do; log ro thanh cong/that bai.
+- Them log path transaction, current date (ke ca null), committed date,
+  timestamps updated va ly do already-triggered.
+
+### Kiem tra va ket qua
+
+- `node --check server/lib/medicineReminderScheduler.js`: pass.
+- `node --check server/index.js`: pass.
+- `git diff --check`: pass; chi co canh bao LF/CRLF cua working copy.
+- Can deploy lai Render va test end-to-end de xac nhan command, care log va
+  Chami. Dat reminder Tokyo hien tai +3 phut, xoa marker cua hom nay truoc test,
+  va theo doi transaction `currentDate=null` commit thanh cong.
+- Khong ghi secret, token, API key hoac service account.
+
 ## 2026-07-24 00:26:42 +09:00
 
 ### Muc tieu

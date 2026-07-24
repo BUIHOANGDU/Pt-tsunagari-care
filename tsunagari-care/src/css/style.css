@@ -854,6 +854,12 @@ a:focus-visible,
   overflow-wrap: anywhere;
 }
 
+.medicine-reminder-readonly small {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
 .medicine-reminder-toggle {
   align-content: center;
   background: var(--success-soft);
@@ -1102,6 +1108,11 @@ a:focus-visible,
   overflow-wrap: anywhere;
 }
 
+.alert-item.alert-success {
+  background: var(--success-soft);
+  border-color: rgba(19, 138, 97, 0.2);
+}
+
 .fall-response-card {
   overflow: hidden;
 }
@@ -1268,6 +1279,58 @@ a:focus-visible,
 .care-item strong {
   display: block;
   margin-bottom: 3px;
+}
+
+.care-item-heading {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.care-item-heading strong {
+  margin: 0;
+}
+
+.medicine-status-badge,
+.medicine-demo-label {
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 0.68rem;
+  font-weight: 800;
+  line-height: 1;
+  padding: 5px 7px;
+}
+
+.medicine-status-badge.is-sent {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.medicine-status-badge.is-confirmed {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.medicine-status-badge.is-no-response {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.medicine-demo-label {
+  background: var(--surface-muted);
+  color: var(--muted);
+}
+
+.care-item.medicine-confirmed .timeline-dot {
+  background: var(--success);
+  box-shadow: 0 0 0 5px var(--success-soft);
+}
+
+.care-item.medicine-no-response .timeline-dot {
+  background: var(--warning);
+  box-shadow: 0 0 0 5px var(--warning-soft);
 }
 
 .commands-item {
