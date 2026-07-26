@@ -992,3 +992,121 @@ Sua loi Fall Response Timeline trong khi Alert Center da co alert Chami `emergen
 - Xac nhan Firebase Rules cho path `care_events`; fallback da bao ve UI nhung event persistence van can quyen ghi.
 - Test full flow voi Live Server, RTDB that va robot Chami.
 - Them safe care event tu firmware/backend o buoc sau.
+
+## 2026-07-26 17:39:37 +09:00
+
+### Muc tieu lan sua
+
+Nang cap Medication Reminder tu mot record co dinh `reminders/medicine_morning`
+thanh collection nhieu lich doc lap theo kieu ung dung bao thuc.
+
+### File da sua
+
+- `index.html`
+- `src/css/style.css`
+- `src/js/firebase-service.js`
+- `src/js/dashboard.js`
+- `C:\Pt-tsunagari-care\server\lib\medicineReminderScheduler.js`
+- `C:\Pt-tsunagari-care\server\routes\chami.js`
+- `PROJECT_HISTORY.md`
+
+Scheduler duoc sua truc tiep tai repo root la file Render dang su dung. Khong sua
+firmware, Firebase config/Rules, fall detection, emergency flow hoac smart home.
+
+### Data model va dashboard
+
+- Moi reminder nam tai `reminders/{reminderId}`; create dung RTDB `push()` va luu
+  lai key vao field `id`.
+- Moi record giu `type=medicine`, ten thuoc, gio `HH:mm`, timezone, `repeat=daily`,
+  enabled, target device, created/updated timestamp va marker occurrence rieng.
+- Record cu `reminders/medicine_morning` neu hop le van duoc list/sua/toggle/xoa
+  nhu reminder binh thuong; khong migration hoac xoa tu dong.
+- Dashboard hien danh sach sap theo gio, co toggle, Sua, Xoa, Nhac ngay va modal
+  Them/Sua. Update giu nguyen ID va `createdAt`; xoa reminder khong xoa care log.
+- Service validate ten thuoc, gio, daily-only va khong nhan ID tu payload.
+- `Nhac ngay` tao mot command co `reminderId` cua dong duoc chon, kiem tra command
+  medicine pending tren cung robot va khong cap nhat `lastTriggeredKey`.
+
+### Scheduler nhieu reminder
+
+- Moi tick doc toan bo `reminders`, validate va xu ly tung medicine reminder trong
+  vong lap rieng; loi cua mot reminder khong dung cac reminder con lai.
+- Moi occurrence co key `${date}_${time}` theo timezone cua reminder, vi du
+  `2026-07-26_08:00`. Transaction chi chay tai
+  `reminders/{reminderId}/lastTriggeredKey`.
+- Callback transaction chap nhan `currentKey=null`; chi abort bang `undefined`
+  khi key da trung. Khong transaction tren toan record va khong return `null`.
+- Sau commit, mot multi-path update ghi ngay/gio/timestamp, tao dung mot command
+  va mot `medicine_reminder_sent` care log cung `reminderId`.
+- Neu multi-path update loi, scheduler rollback marker va cac trigger timestamp
+  truoc do, dong thoi log rollback thanh cong/that bai.
+- Pending cung `reminderId` duoc log `pending_same_reminder`; pending medicine
+  khac tren cung robot duoc log `robot_busy`. Marker chua duoc commit khi robot
+  busy, nen tick sau con co the thu lai.
+- Tick chay moi 30 giay va chi retry toi da 5 phut neu occurrence da den han khi
+  lich dang bat nhung bi pending/robot busy hoac loi ghi. Lich duoc bat sau khi
+  da qua gio khong tu dong nhan grace period. Day la gioi han co chu dich de
+  khong tao queue vo han.
+- `repeat=daily` hoat dong vi ngay Tokyo tiep theo tao occurrence key moi. Toggle
+  off giu record nhung scheduler skip.
+
+### Medicine follow-up backend
+
+- Route Chami giu `reminderId` trong `medicine_taken`/`medicine_no_response` neu
+  firmware gui field nay.
+- Firmware hien co the chua gui `reminderId`; backend van chap nhan payload nhung
+  khong tu gan `medicine_morning` hay mot reminder bat ky, tranh gan sai khi co
+  nhieu lich. Khi thieu ca ID va ten thuoc, ten hien thi fallback la `Thuoc`.
+- Han che hien tai: follow-up khong co `reminderId` khong the lien ket chac chan
+  voi mot lich cu the cho toi khi firmware truyen lai ID cua command.
+
+### Logging
+
+- Scheduler log count, tung reminder, occurrence key, disabled/time-not-due,
+  already-triggered, pending-same, robot-busy, transaction, timestamp update,
+  command ID va care log reminder ID.
+- Dashboard log loaded count va ID cho create/update/delete/toggle/immediate.
+- Khong log token, credential hoac secret.
+
+### Kiem tra da chay
+
+- `node --check server/lib/medicineReminderScheduler.js`: pass.
+- Test helper occurrence bang Firebase stub: pass cho hai ngay Tokyo lien tiep
+  tao hai key khac nhau; lich qua gio khong tu nhan grace period.
+- Test scheduler voi RTDB gia lap: pass cho hai reminder cung gio; A tao command,
+  B gap `robot_busy` khong bi ghi marker, sau khi command A done thi B trigger o
+  tick ke tiep. Case 23:59/00:00 giu dung key cua occurrence ngay truoc; ca A/B
+  deu trigger lai voi key ngay Tokyo tiep theo. Lich disabled va lich chua den
+  gio khong trigger.
+- Test local-mode service: pass cho tao ba lich, reload list, update giu ID va
+  `createdAt`, toggle, Nhac ngay giu marker, xoa reminder va giu care log.
+- Lan require helper dau tien khong chay vi repo root hien khong co
+  `node_modules/firebase-admin`; test sau do dung stub va khong truy cap RTDB.
+- Chrome/Edge headless khong render duoc screenshot do GPU process tren may test
+  bi crash; chua danh dau visual test la pass.
+
+### Cach test thu cong tren RTDB/Render
+
+1. Tao ba lich 08:00, 12:30 va 20:00; reload dashboard va xac nhan ca ba ID van
+   ton tai.
+2. Dat hai lich cach hien tai 2 va 5 phut; redeploy Render va theo doi log de A,
+   sau do B, tao command/care log rieng.
+3. Tick lap lai cung occurrence phai log `already_triggered_occurrence` va khong
+   tao command thu hai.
+4. Tat mot lich va xac nhan scheduler log `disabled`; bat lai de lich chay vao
+   occurrence tiep theo.
+5. Sua gio lich A, xac nhan ID khong doi va B/C khong bi cap nhat.
+6. Xoa lich C, xac nhan care log cu van con.
+7. Bam Nhac ngay lich B, xac nhan command co reminderId B va marker cua B khong
+   doi.
+8. Cho robot co medicine command pending, dua lich khac den gio va xac nhan log
+   `robot_busy`; sau khi command cu ket thuc trong cua so retry, lich moi duoc gui.
+
+### Viec con lai
+
+- Chay end-to-end voi Firebase RTDB that, Render va Chami de xac nhan Rules/index,
+  command lifecycle va ba lan nhac firmware.
+- Xac nhan giao dien desktop/mobile bang trinh duyet thuong vi headless browser
+  trong session nay khong render duoc.
+- De lien ket follow-up chinh xac trong he nhieu lich, firmware can gui
+  `reminderId` nhan duoc tu command trong payload ket qua o mot thay doi rieng.

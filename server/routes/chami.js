@@ -84,6 +84,7 @@ async function resolveMedicineName(db, reminderId, suppliedName) {
   }
   const cleaned = cleanString(suppliedName, MAX_MEDICINE_NAME_LENGTH);
   if (cleaned) return cleaned;
+  if (!reminderId) return "Thuốc";
 
   try {
     const snapshot = await db
@@ -123,11 +124,18 @@ async function normalizeMedicineEvent(body, db) {
     throw new Error("Unsupported medication event type");
   }
 
+  if (
+    body.reminderId !== undefined &&
+    body.reminderId !== null &&
+    typeof body.reminderId !== "string"
+  ) {
+    throw new Error("reminderId must be a string");
+  }
   const reminderId =
     typeof body.reminderId === "string" && body.reminderId.trim()
       ? body.reminderId.trim()
-      : "medicine_morning";
-  if (!SAFE_REMINDER_ID_RE.test(reminderId)) {
+      : null;
+  if (reminderId && !SAFE_REMINDER_ID_RE.test(reminderId)) {
     throw new Error("Invalid reminderId");
   }
 
@@ -161,6 +169,7 @@ async function normalizeMedicineEvent(body, db) {
     reminderId,
     body.medicineName,
   );
+  const reminderFields = reminderId ? { reminderId } : {};
 
   if (type === "medicine_taken") {
     const attempt = readBoundedInteger(body.attempt, "attempt", {
@@ -174,7 +183,7 @@ async function normalizeMedicineEvent(body, db) {
         status: "confirmed",
         level: normalizeChoice(body.level, ALERT_LEVELS, "info"),
         medicineName,
-        reminderId,
+        ...reminderFields,
         attempt,
         message: cleanString(
           body.message,
@@ -200,7 +209,7 @@ async function normalizeMedicineEvent(body, db) {
       status: "no_response",
       level: normalizeChoice(body.level, ALERT_LEVELS, "warning"),
       medicineName,
-      reminderId,
+      ...reminderFields,
       attempts,
       message: cleanString(
         body.message,
@@ -246,7 +255,7 @@ async function writeMedicineFollowup(req, res) {
       return {
         type: event.type,
         source: event.source,
-        reminderId: event.reminderId,
+        ...(event.reminderId ? { reminderId: event.reminderId } : {}),
         createdAt: getServerTimestamp(),
       };
     });

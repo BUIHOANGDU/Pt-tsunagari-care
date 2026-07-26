@@ -810,6 +810,201 @@ a:focus-visible,
   overflow: hidden;
 }
 
+.medicine-reminder-add {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.medicine-reminder-list {
+  border-bottom: 1px solid var(--line);
+  border-top: 1px solid var(--line);
+}
+
+.medicine-reminder-row {
+  align-items: center;
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-width: 0;
+  padding: 16px 0;
+}
+
+.medicine-reminder-row + .medicine-reminder-row {
+  border-top: 1px solid var(--line);
+}
+
+.medicine-reminder-row.is-disabled .medicine-reminder-schedule {
+  opacity: 0.52;
+}
+
+.medicine-reminder-schedule {
+  align-items: center;
+  display: flex;
+  gap: 16px;
+  min-width: 0;
+}
+
+.medicine-reminder-schedule time {
+  color: var(--text);
+  flex: 0 0 88px;
+  font-size: 2rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.medicine-reminder-schedule > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.medicine-reminder-schedule strong,
+.medicine-reminder-schedule span,
+.medicine-reminder-last-triggered {
+  overflow-wrap: anywhere;
+}
+
+.medicine-reminder-schedule strong {
+  font-size: 0.96rem;
+}
+
+.medicine-reminder-schedule span,
+.medicine-reminder-last-triggered {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.medicine-reminder-controls {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
+.medicine-list-toggle {
+  align-items: center;
+  display: inline-flex;
+  gap: 7px;
+  min-width: 72px;
+}
+
+.medicine-list-toggle input {
+  appearance: none;
+  background: #cbd5d1;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  flex: 0 0 40px;
+  height: 22px;
+  margin: 0;
+  position: relative;
+  width: 40px;
+}
+
+.medicine-list-toggle input::after {
+  background: #ffffff;
+  border-radius: 50%;
+  content: "";
+  height: 16px;
+  left: 3px;
+  position: absolute;
+  top: 3px;
+  transition: transform 160ms ease;
+  width: 16px;
+}
+
+.medicine-list-toggle input:checked {
+  background: var(--primary);
+}
+
+.medicine-list-toggle input:checked::after {
+  transform: translateX(18px);
+}
+
+.medicine-list-toggle input:focus-visible {
+  outline: 3px solid rgba(19, 138, 97, 0.24);
+  outline-offset: 2px;
+}
+
+.medicine-list-toggle span {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.medicine-reminder-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.medicine-reminder-actions button {
+  min-height: 34px;
+  padding: 7px 10px;
+}
+
+.medicine-delete-button {
+  color: var(--danger);
+}
+
+.medicine-reminder-empty {
+  color: var(--muted);
+  margin: 0;
+  padding: 28px 12px;
+  text-align: center;
+}
+
+.medicine-reminder-dialog {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 24px 70px rgba(31, 45, 40, 0.2);
+  color: var(--text);
+  max-width: calc(100% - 32px);
+  padding: 0;
+  width: 560px;
+}
+
+.medicine-reminder-dialog::backdrop {
+  background: rgba(20, 31, 27, 0.48);
+}
+
+.medicine-reminder-dialog form {
+  display: grid;
+  gap: 20px;
+  padding: 22px;
+}
+
+.medicine-dialog-heading {
+  align-items: flex-start;
+  display: flex;
+  justify-content: space-between;
+}
+
+.medicine-dialog-heading h2 {
+  font-size: 1.2rem;
+  margin: 2px 0 0;
+}
+
+.medicine-dialog-close {
+  align-items: center;
+  display: inline-flex;
+  font-size: 1.5rem;
+  height: 38px;
+  justify-content: center;
+  line-height: 1;
+  padding: 0;
+  width: 38px;
+}
+
+.medicine-dialog-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 .medicine-reminder-form {
   display: grid;
   gap: 12px;
@@ -1502,6 +1697,43 @@ a:focus-visible,
 
   .medicine-reminder-form {
     grid-template-columns: 1fr;
+  }
+
+  .medicine-reminder-card .section-heading,
+  .medicine-reminder-row,
+  .medicine-reminder-controls {
+    align-items: stretch;
+  }
+
+  .medicine-reminder-card .section-heading,
+  .medicine-reminder-row {
+    grid-template-columns: 1fr;
+  }
+
+  .medicine-reminder-card .section-heading {
+    display: grid;
+    gap: 12px;
+  }
+
+  .medicine-reminder-add {
+    width: 100%;
+  }
+
+  .medicine-reminder-controls {
+    flex-direction: column;
+  }
+
+  .medicine-list-toggle {
+    justify-content: flex-start;
+  }
+
+  .medicine-reminder-actions {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .medicine-reminder-actions button {
+    flex: 1 1 auto;
   }
 
   .robot-stats-compact {

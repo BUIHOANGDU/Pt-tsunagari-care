@@ -20,13 +20,8 @@ const FALL_RESPONSE_CLOCK_SKEW_MS = 30 * 1000;
 const FALL_RESPONSE_TIMELINE_REFRESH_INTERVAL_MS = 30 * 1000;
 const LEGACY_DEMO_MEDICINE_MESSAGE =
   "\u0110\u00e3 u\u1ed1ng thu\u1ed1c (demo)";
-const MEDICINE_REMINDER_COMMAND_TEXT =
-  "Nh\u1eafc ng\u01b0\u1eddi d\u00f9ng u\u1ed1ng thu\u1ed1c";
-const MEDICINE_REMINDER_LOG_MESSAGE =
-  "\u0110\u00e3 g\u1eedi l\u1ec7nh nh\u1eafc u\u1ed1ng thu\u1ed1c cho Chami";
-const MEDICINE_REMINDER_ID = "medicine_morning";
 const DEFAULT_MEDICINE_REMINDER = {
-  medicineName: "Thuốc huyết áp",
+  medicineName: "",
   time: "08:00",
   timezone: "Asia/Tokyo",
   repeat: "daily",
@@ -40,9 +35,10 @@ const MEDICINE_CARE_TYPES = new Set([
   "medicine_taken",
   "medicine_no_response",
 ]);
-let latestMedicineReminder = null;
+let latestMedicineReminders = [];
 let latestMedicineCareLogs = [];
-let medicineReminderRequestRunning = false;
+let editingMedicineReminderId = null;
+const medicineReminderRequests = new Set();
 
 function updateRobotSection(robot) {
   // Update overview cards
@@ -561,10 +557,17 @@ function isValidMedicineCareLog(log) {
 }
 
 function getMedicineCarePresentation(log) {
+  const linkedReminder = log.reminderId
+    ? latestMedicineReminders.find(
+        (reminder) => reminder.id === log.reminderId,
+      )
+    : latestMedicineReminders.length === 1
+      ? latestMedicineReminders[0]
+      : null;
   const medicineName =
     log.medicineName ||
-    latestMedicineReminder?.medicineName ||
-    DEFAULT_MEDICINE_REMINDER.medicineName;
+    linkedReminder?.medicineName ||
+    "Thuốc";
   const time = formatMedicineTime(log.createdAt || log.receivedAt);
   const demoLabel = log.source === "demo" ? "Demo" : "";
 
@@ -675,13 +678,18 @@ formatDateTime = function (value) {
 
 function getMedicineReminderEls() {
   return {
+    list: document.getElementById("medicine-reminder-list"),
+    addButton: document.getElementById("medicine-reminder-add"),
+    dialog: document.getElementById("medicine-reminder-dialog"),
+    dialogTitle: document.getElementById("medicine-reminder-dialog-title"),
+    form: document.getElementById("medicine-reminder-form"),
+    closeButton: document.getElementById("medicine-reminder-dialog-close"),
+    cancelButton: document.getElementById("medicine-reminder-cancel"),
     nameInput: document.getElementById("medicine-name-input"),
     timeInput: document.getElementById("medicine-time-input"),
     enabledInput: document.getElementById("medicine-enabled-input"),
     saveButton: document.getElementById("medicine-reminder-save"),
-    nowButton: document.getElementById("medicine-reminder-now"),
     status: document.getElementById("medicine-reminder-status"),
-    lastTriggered: document.getElementById("medicine-last-triggered"),
   };
 }
 
@@ -711,119 +719,299 @@ function getMedicineReminderFormData() {
   };
 }
 
-function renderMedicineReminder(reminder) {
-  const { nameInput, timeInput, enabledInput, lastTriggered } =
-    getMedicineReminderEls();
-  const data = reminder || DEFAULT_MEDICINE_REMINDER;
-  latestMedicineReminder = reminder || null;
+function createMedicineActionButton(action, reminderId, label, className = "") {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.dataset.medicineAction = action;
+  button.dataset.reminderId = reminderId;
+  button.textContent = label;
+  if (className) button.className = className;
+  return button;
+}
 
-  if (nameInput) nameInput.value = data.medicineName || DEFAULT_MEDICINE_REMINDER.medicineName;
-  if (timeInput) timeInput.value = data.time || DEFAULT_MEDICINE_REMINDER.time;
-  if (enabledInput) enabledInput.checked = data.enabled !== false;
-  if (lastTriggered) {
-    lastTriggered.textContent = data.lastTriggeredAt
-      ? formatDateTime(data.lastTriggeredAt)
-      : "Chưa có";
+function renderMedicineReminders(reminders) {
+  const { list } = getMedicineReminderEls();
+  if (!list) return;
+
+  latestMedicineReminders = Array.isArray(reminders) ? reminders : [];
+  list.replaceChildren();
+
+  if (!latestMedicineReminders.length) {
+    const empty = document.createElement("p");
+    empty.className = "medicine-reminder-empty";
+    empty.textContent = "Chưa có lịch nhắc thuốc.";
+    list.appendChild(empty);
+    renderLatestMedicineFollowup();
+    return;
   }
+
+  latestMedicineReminders.forEach((reminder) => {
+    const row = document.createElement("article");
+    row.className = "medicine-reminder-row";
+    if (reminder.enabled === false) row.classList.add("is-disabled");
+    row.dataset.reminderId = reminder.id;
+
+    const schedule = document.createElement("div");
+    schedule.className = "medicine-reminder-schedule";
+    const time = document.createElement("time");
+    time.dateTime = reminder.time || "";
+    time.textContent = reminder.time || "--:--";
+    const details = document.createElement("div");
+    const name = document.createElement("strong");
+    name.textContent = reminder.medicineName || "Thuốc";
+    const repeat = document.createElement("span");
+    repeat.textContent = "Hằng ngày";
+    details.append(name, repeat);
+    schedule.append(time, details);
+
+    const controls = document.createElement("div");
+    controls.className = "medicine-reminder-controls";
+    const toggle = document.createElement("label");
+    toggle.className = "medicine-list-toggle";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = reminder.enabled !== false;
+    checkbox.dataset.medicineAction = "toggle";
+    checkbox.dataset.reminderId = reminder.id;
+    checkbox.setAttribute(
+      "aria-label",
+      `${checkbox.checked ? "Tắt" : "Bật"} lịch ${reminder.medicineName || ""}`,
+    );
+    const toggleText = document.createElement("span");
+    toggleText.textContent = checkbox.checked ? "Bật" : "Tắt";
+    toggle.append(checkbox, toggleText);
+
+    const actions = document.createElement("div");
+    actions.className = "medicine-reminder-actions";
+    actions.append(
+      createMedicineActionButton("edit", reminder.id, "Sửa"),
+      createMedicineActionButton(
+        "delete",
+        reminder.id,
+        "Xóa",
+        "medicine-delete-button",
+      ),
+      createMedicineActionButton(
+        "now",
+        reminder.id,
+        "Nhắc ngay",
+        "primary",
+      ),
+    );
+    controls.append(toggle, actions);
+
+    if (reminder.lastTriggeredAt) {
+      const lastTriggered = document.createElement("small");
+      lastTriggered.className = "medicine-reminder-last-triggered";
+      lastTriggered.textContent = `Lần gần nhất: ${formatDateTime(
+        reminder.lastTriggeredAt,
+      )}`;
+      details.appendChild(lastTriggered);
+    }
+
+    row.append(schedule, controls);
+    list.appendChild(row);
+  });
+
   renderLatestMedicineFollowup();
 }
 
-async function saveMedicineReminderFromDashboard() {
+function openMedicineReminderDialog(reminder = null) {
+  const {
+    dialog,
+    dialogTitle,
+    nameInput,
+    timeInput,
+    enabledInput,
+  } = getMedicineReminderEls();
+  if (!dialog) return;
+
+  editingMedicineReminderId = reminder?.id || null;
+  if (dialogTitle) {
+    dialogTitle.textContent = reminder ? "Sửa lịch nhắc" : "Thêm lịch nhắc";
+  }
+  if (nameInput) nameInput.value = reminder?.medicineName || "";
+  if (timeInput) {
+    timeInput.value = reminder?.time || DEFAULT_MEDICINE_REMINDER.time;
+  }
+  if (enabledInput) enabledInput.checked = reminder?.enabled !== false;
+
+  if (typeof dialog.showModal === "function") {
+    dialog.showModal();
+  } else {
+    dialog.setAttribute("open", "");
+  }
+  nameInput?.focus();
+}
+
+function closeMedicineReminderDialog() {
+  const { dialog } = getMedicineReminderEls();
+  editingMedicineReminderId = null;
+  if (dialog?.open && typeof dialog.close === "function") {
+    dialog.close();
+  } else {
+    dialog?.removeAttribute("open");
+  }
+}
+
+async function saveMedicineReminderFromDashboard(event) {
+  event.preventDefault();
   const { saveButton } = getMedicineReminderEls();
 
   try {
     if (saveButton) saveButton.disabled = true;
     const payload = getMedicineReminderFormData();
-    const saved = await FirebaseService.saveMedicineReminder(
-      payload,
-      MEDICINE_REMINDER_ID,
-    );
-    latestMedicineReminder = saved;
-    console.log("Dashboard: medicine reminder saved");
-    setMedicineReminderStatus("Đã lưu lịch nhắc thuốc");
+    if (editingMedicineReminderId) {
+      const reminderId = editingMedicineReminderId;
+      await FirebaseService.updateMedicineReminder(reminderId, payload);
+      console.log(`Dashboard: medicine reminder updated id=${reminderId}`);
+      setMedicineReminderStatus("Đã cập nhật lịch nhắc thuốc");
+    } else {
+      const created = await FirebaseService.createMedicineReminder(payload);
+      console.log(`Dashboard: medicine reminder created id=${created.id}`);
+      setMedicineReminderStatus("Đã thêm lịch nhắc thuốc");
+    }
+    closeMedicineReminderDialog();
   } catch (error) {
     console.error("Dashboard: medicine reminder save failed", error);
-    setMedicineReminderStatus("Không thể lưu lịch nhắc thuốc");
+    setMedicineReminderStatus(error.message || "Không thể lưu lịch nhắc thuốc");
   } finally {
     if (saveButton) saveButton.disabled = false;
   }
 }
 
-async function updateMedicineReminderEnabled(enabled) {
+async function updateMedicineReminderEnabled(reminderId, enabled, checkbox) {
   try {
-    await FirebaseService.setMedicineReminderEnabled(
-      enabled,
-      MEDICINE_REMINDER_ID,
-    );
+    checkbox.disabled = true;
+    await FirebaseService.setMedicineReminderEnabled(reminderId, enabled);
     console.log(
-      enabled
-        ? "Dashboard: medicine reminder enabled"
-        : "Dashboard: medicine reminder disabled",
+      `Dashboard: medicine reminder toggled id=${reminderId} enabled=${enabled}`,
     );
-    setMedicineReminderStatus(enabled ? "Đã bật lịch nhắc thuốc" : "Lịch đang tắt");
+    setMedicineReminderStatus(
+      enabled ? "Đã bật lịch nhắc thuốc" : "Đã tắt lịch nhắc thuốc",
+    );
   } catch (error) {
-    console.error("Dashboard: medicine reminder enabled update failed", error);
-    setMedicineReminderStatus("Không thể lưu lịch nhắc thuốc");
+    checkbox.checked = !enabled;
+    console.error("Dashboard: medicine reminder toggle failed", error);
+    setMedicineReminderStatus("Không thể đổi trạng thái lịch nhắc thuốc");
+  } finally {
+    checkbox.disabled = false;
   }
 }
 
-async function createMedicineReminderNowCommand() {
-  if (medicineReminderRequestRunning) return;
-
-  const { nowButton } = getMedicineReminderEls();
-  medicineReminderRequestRunning = true;
+async function removeMedicineReminder(reminderId) {
+  const reminder = latestMedicineReminders.find(
+    (item) => item.id === reminderId,
+  );
+  if (!reminder) return;
+  if (!window.confirm(`Xóa lịch “${reminder.medicineName}” lúc ${reminder.time}?`)) {
+    return;
+  }
 
   try {
-    if (nowButton) nowButton.disabled = true;
-    const formData = getMedicineReminderFormData();
-    const medicineName =
-      latestMedicineReminder?.medicineName || formData.medicineName;
-    const result = await FirebaseService.createMedicineReminderCommand({
-      source: "dashboard",
-      targetDeviceId: "chami_001",
-      medicineName,
-    });
+    await FirebaseService.deleteMedicineReminder(reminderId);
+    console.log(`Dashboard: medicine reminder deleted id=${reminderId}`);
+    setMedicineReminderStatus("Đã xóa lịch nhắc thuốc");
+  } catch (error) {
+    console.error("Dashboard: medicine reminder delete failed", error);
+    setMedicineReminderStatus("Không thể xóa lịch nhắc thuốc");
+  }
+}
+
+async function createMedicineReminderNowCommand(reminderId, button) {
+  if (medicineReminderRequests.has(reminderId)) return;
+  const reminder = latestMedicineReminders.find(
+    (item) => item.id === reminderId,
+  );
+  if (!reminder) return;
+  medicineReminderRequests.add(reminderId);
+
+  try {
+    button.disabled = true;
+    const result =
+      await FirebaseService.createMedicineReminderCommand(reminder);
 
     if (result?.skipped) {
       setMedicineReminderStatus(
-        "Chami đã có yêu cầu nhắc thuốc đang chờ xử lý",
+        result.reason === "pending_same_reminder"
+          ? "Lịch này đã có yêu cầu đang chờ xử lý"
+          : "Chami đang xử lý một lời nhắc thuốc khác",
       );
       return;
     }
 
-    console.log("Chami medicine reminder command created", {
-      id: result?.command?.id || null,
-      target: result?.command?.target || "chami_001",
-      action: result?.command?.action || "remind_medicine",
-      status: result?.command?.status || "pending",
-    });
+    console.log(
+      `Dashboard: immediate reminder command created reminderId=${reminderId}`,
+    );
     setMedicineReminderStatus("Đã tạo yêu cầu nhắc ngay");
   } catch (error) {
-    console.error("Failed to create Chami medicine reminder command", error);
+    console.error("Dashboard: immediate medicine reminder failed", error);
     setMedicineReminderStatus("Không thể tạo yêu cầu nhắc ngay");
   } finally {
-    medicineReminderRequestRunning = false;
-    if (nowButton) nowButton.disabled = false;
+    medicineReminderRequests.delete(reminderId);
+    button.disabled = false;
   }
 }
 
 function bindMedicineReminderDashboard() {
-  const { saveButton, nowButton, enabledInput } = getMedicineReminderEls();
+  const {
+    list,
+    addButton,
+    dialog,
+    form,
+    closeButton,
+    cancelButton,
+  } = getMedicineReminderEls();
 
-  renderMedicineReminder(latestMedicineReminder);
-  saveButton?.addEventListener("click", saveMedicineReminderFromDashboard);
-  nowButton?.addEventListener("click", createMedicineReminderNowCommand);
-  enabledInput?.addEventListener("change", (event) => {
-    updateMedicineReminderEnabled(event.target.checked);
+  renderMedicineReminders([]);
+  addButton?.addEventListener("click", () => openMedicineReminderDialog());
+  closeButton?.addEventListener("click", closeMedicineReminderDialog);
+  cancelButton?.addEventListener("click", closeMedicineReminderDialog);
+  form?.addEventListener("submit", saveMedicineReminderFromDashboard);
+  dialog?.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    closeMedicineReminderDialog();
   });
 
-  if (typeof FirebaseService.listenMedicineReminder === "function") {
-    FirebaseService.listenMedicineReminder((reminder) => {
-      renderMedicineReminder(reminder);
-      if (reminder?.enabled === false) {
-        setMedicineReminderStatus("Lịch đang tắt");
+  list?.addEventListener("change", (event) => {
+    const checkbox = event.target.closest(
+      'input[data-medicine-action="toggle"]',
+    );
+    if (!checkbox) return;
+    updateMedicineReminderEnabled(
+      checkbox.dataset.reminderId,
+      checkbox.checked,
+      checkbox,
+    );
+  });
+
+  list?.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-medicine-action]");
+    if (!button) return;
+    const reminderId = button.dataset.reminderId;
+    const reminder = latestMedicineReminders.find(
+      (item) => item.id === reminderId,
+    );
+
+    if (button.dataset.medicineAction === "edit" && reminder) {
+      openMedicineReminderDialog(reminder);
+    } else if (button.dataset.medicineAction === "delete") {
+      removeMedicineReminder(reminderId);
+    } else if (button.dataset.medicineAction === "now") {
+      createMedicineReminderNowCommand(reminderId, button);
+    }
+  });
+
+  if (typeof FirebaseService.listenMedicineReminders === "function") {
+    FirebaseService.listenMedicineReminders((reminders) => {
+      renderMedicineReminders(reminders);
+      console.log(
+        `Dashboard: medicine reminders loaded count=${reminders.length}`,
+      );
+      if (!reminders.length) {
+        setMedicineReminderStatus("Chưa có lịch nhắc thuốc");
       }
-    }, MEDICINE_REMINDER_ID);
+    });
   }
 }
 
@@ -1992,9 +2180,9 @@ document
   });
 
 async function createDemoMedicineEvent(type) {
-  const medicineName =
-    latestMedicineReminder?.medicineName ||
-    DEFAULT_MEDICINE_REMINDER.medicineName;
+  const linkedReminder =
+    latestMedicineReminders.length === 1 ? latestMedicineReminders[0] : null;
+  const medicineName = linkedReminder?.medicineName || "Thuốc";
   const createdAt = new Date().toISOString();
   const confirmed = type === "medicine_taken";
   const event = {
@@ -2006,7 +2194,7 @@ async function createDemoMedicineEvent(type) {
     attempt: confirmed ? 2 : undefined,
     attempts: confirmed ? null : 3,
     medicineName,
-    reminderId: MEDICINE_REMINDER_ID,
+    ...(linkedReminder?.id ? { reminderId: linkedReminder.id } : {}),
     message: confirmed
       ? "Người dùng đã xác nhận uống thuốc"
       : "Không có phản hồi sau 3 lần nhắc uống thuốc",

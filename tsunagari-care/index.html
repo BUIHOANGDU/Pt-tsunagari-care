@@ -282,46 +282,27 @@
                 <p class="section-kicker">Chami reminder</p>
                 <h2 id="medicine-reminder-title">Lịch nhắc uống thuốc</h2>
               </div>
+              <button
+                id="medicine-reminder-add"
+                class="primary medicine-reminder-add"
+                type="button"
+              >
+                + Thêm lịch
+              </button>
             </div>
 
-            <div class="medicine-reminder-form">
-              <label>
-                <span>Tên thuốc</span>
-                <input
-                  id="medicine-name-input"
-                  type="text"
-                  value="Thuốc huyết áp"
-                  autocomplete="off"
-                />
-              </label>
-              <label>
-                <span>Giờ uống</span>
-                <input id="medicine-time-input" type="time" value="08:00" />
-              </label>
-              <div class="medicine-reminder-readonly">
-                <span>Lặp lại</span>
-                <strong>Hằng ngày</strong>
-              </div>
-              <div class="medicine-reminder-readonly">
-                <span>Múi giờ</span>
-                <strong>Asia/Tokyo</strong>
-              </div>
-              <label class="medicine-reminder-toggle">
-                <input id="medicine-enabled-input" type="checkbox" checked />
-                <span>Trạng thái lịch</span>
-              </label>
-              <div class="medicine-reminder-readonly">
-                <span>Lần nhắc gần nhất</span>
-                <strong id="medicine-last-triggered">Chưa có</strong>
-                <small id="medicine-last-triggered-detail"></small>
-              </div>
+            <div
+              id="medicine-reminder-list"
+              class="medicine-reminder-list"
+              aria-live="polite"
+            >
+              <p class="medicine-reminder-empty">Chưa có lịch nhắc thuốc.</p>
             </div>
-
-            <div class="btn-row">
-              <button id="medicine-reminder-save" class="primary">Lưu lịch</button>
-              <button id="medicine-reminder-now">Nhắc ngay</button>
-            </div>
-            <p id="medicine-reminder-status" class="medicine-reminder-status" aria-live="polite"></p>
+            <p
+              id="medicine-reminder-status"
+              class="medicine-reminder-status"
+              aria-live="polite"
+            ></p>
           </section>
 
           <section class="panel-card health-card" id="health-card" aria-labelledby="health-title">
@@ -373,6 +354,62 @@
         </section>
       </section>
     </main>
+
+    <dialog
+      id="medicine-reminder-dialog"
+      class="medicine-reminder-dialog"
+      aria-labelledby="medicine-reminder-dialog-title"
+    >
+      <form id="medicine-reminder-form" method="dialog">
+        <div class="medicine-dialog-heading">
+          <div>
+            <p class="section-kicker">Medication schedule</p>
+            <h2 id="medicine-reminder-dialog-title">Thêm lịch nhắc</h2>
+          </div>
+          <button
+            id="medicine-reminder-dialog-close"
+            class="medicine-dialog-close"
+            type="button"
+            title="Đóng"
+            aria-label="Đóng"
+          >
+            &times;
+          </button>
+        </div>
+
+        <div class="medicine-reminder-form">
+          <label>
+            <span>Tên thuốc</span>
+            <input
+              id="medicine-name-input"
+              type="text"
+              maxlength="100"
+              autocomplete="off"
+              required
+            />
+          </label>
+          <label>
+            <span>Giờ uống</span>
+            <input id="medicine-time-input" type="time" required />
+          </label>
+          <div class="medicine-reminder-readonly">
+            <span>Lặp lại</span>
+            <strong>Hằng ngày</strong>
+          </div>
+          <label class="medicine-reminder-toggle">
+            <input id="medicine-enabled-input" type="checkbox" checked />
+            <span>Trạng thái: Bật</span>
+          </label>
+        </div>
+
+        <div class="medicine-dialog-actions">
+          <button id="medicine-reminder-cancel" type="button">Hủy</button>
+          <button id="medicine-reminder-save" class="primary" type="submit">
+            Lưu
+          </button>
+        </div>
+      </form>
+    </dialog>
 
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>

@@ -27,7 +27,6 @@ const FirebaseService = (function () {
     commands: null,
     medicine_reminders: null,
   };
-  const DEFAULT_MEDICINE_REMINDER_ID = "medicine_morning";
   const DEFAULT_MEDICINE_REMINDER = {
     type: "medicine",
     medicineName: "Thuốc huyết áp",
@@ -36,8 +35,6 @@ const FirebaseService = (function () {
     repeat: "daily",
     enabled: true,
     targetDeviceId: "chami_001",
-    lastTriggeredDate: null,
-    lastTriggeredAt: null,
   };
   const MEDICINE_TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
   const LEGACY_DEMO_MEDICINE_MESSAGE =
@@ -328,39 +325,6 @@ const FirebaseService = (function () {
     return subscribeTo("commands", cb);
   }
 
-  function listenMedicineReminder(
-    callback,
-    reminderId = DEFAULT_MEDICINE_REMINDER_ID,
-  ) {
-    listeners.medicine_reminders.push(callback);
-
-    if (useRealtime) {
-      const ref = db.ref(`reminders/${reminderId}`);
-      const handler = (snapshot) => {
-        const value = snapshot.val();
-        callback(value ? { id: reminderId, ...value } : null);
-      };
-
-      ref.on("value", handler, (err) => {
-        console.warn("Medicine reminder listener error", err);
-        callback(null);
-      });
-
-      return () => {
-        ref.off("value", handler);
-        const idx = listeners.medicine_reminders.indexOf(callback);
-        if (idx > -1) listeners.medicine_reminders.splice(idx, 1);
-      };
-    }
-
-    callback(getLocalMedicineReminder(reminderId));
-
-    return () => {
-      const idx = listeners.medicine_reminders.indexOf(callback);
-      if (idx > -1) listeners.medicine_reminders.splice(idx, 1);
-    };
-  }
-
   // ---------- CRUD ----------
   async function getRobot(id = "chami01") {
     if (useRealtime) {
@@ -573,149 +537,317 @@ const FirebaseService = (function () {
     notifyLocal("care_logs");
   }
 
-  function getLocalMedicineReminder(reminderId = DEFAULT_MEDICINE_REMINDER_ID) {
-    const reminders = readLocal("mock:reminders") || {};
-    const reminder = reminders[reminderId];
-    return reminder ? { id: reminderId, ...reminder } : null;
+  function assertMedicineReminderId(reminderId) {
+    if (
+      typeof reminderId !== "string" ||
+      !reminderId.trim() ||
+      reminderId.length > 128 ||
+      /[.#$\[\]\/]/.test(reminderId)
+    ) {
+      throw new Error("Invalid medicine reminder id");
+    }
+    return reminderId.trim();
   }
 
-  function notifyLocalMedicineReminder(reminderId = DEFAULT_MEDICINE_REMINDER_ID) {
-    const reminder = getLocalMedicineReminder(reminderId);
-    listeners.medicine_reminders.forEach((cb) => cb(reminder));
+  function normalizeMedicineReminderList(value) {
+    if (!value || typeof value !== "object") return [];
+
+    const entries = Array.isArray(value)
+      ? value
+          .filter((item) => item && typeof item === "object" && item.id)
+          .map((item) => [item.id, item])
+      : Object.entries(value);
+
+    return entries
+      .filter(
+        ([reminderId, reminder]) =>
+          reminderId &&
+          reminder &&
+          typeof reminder === "object" &&
+          reminder.type === "medicine",
+      )
+      .map(([reminderId, reminder]) => ({
+        ...reminder,
+        id: String(reminderId),
+      }))
+      .sort(
+        (a, b) =>
+          String(a.time || "").localeCompare(String(b.time || "")) ||
+          String(a.medicineName || "").localeCompare(
+            String(b.medicineName || ""),
+            "vi",
+          ),
+      );
+  }
+
+  function getLocalMedicineReminders() {
+    return normalizeMedicineReminderList(readLocal("mock:reminders") || {});
+  }
+
+  function notifyLocalMedicineReminders() {
+    const reminders = getLocalMedicineReminders();
+    listeners.medicine_reminders.forEach((cb) => cb(reminders));
   }
 
   function sanitizeMedicineReminderData(data = {}, existing = null) {
     const medicineName =
-      typeof data.medicineName === "string" ? data.medicineName.trim() : "";
-    const time = typeof data.time === "string" ? data.time.trim() : "";
+      typeof data.medicineName === "string"
+        ? data.medicineName.trim()
+        : String(existing?.medicineName || "").trim();
+    const time =
+      typeof data.time === "string"
+        ? data.time.trim()
+        : String(existing?.time || "").trim();
+    const repeat =
+      data.repeat === undefined ? existing?.repeat || "daily" : data.repeat;
 
     if (!medicineName) {
       throw new Error("medicineName is required");
     }
-
+    if (medicineName.length > 100) {
+      throw new Error("medicineName is too long");
+    }
     if (!MEDICINE_TIME_RE.test(time)) {
       throw new Error("time must use HH:mm format");
     }
+    if (repeat !== "daily") {
+      throw new Error("repeat currently supports daily only");
+    }
 
-    const payload = {
+    const timezone =
+      typeof data.timezone === "string" && data.timezone.trim()
+        ? data.timezone.trim()
+        : existing?.timezone || DEFAULT_MEDICINE_REMINDER.timezone;
+    const targetDeviceId =
+      typeof data.targetDeviceId === "string" && data.targetDeviceId.trim()
+        ? data.targetDeviceId.trim()
+        : existing?.targetDeviceId ||
+          DEFAULT_MEDICINE_REMINDER.targetDeviceId;
+
+    return {
       type: "medicine",
       medicineName,
       time,
-      timezone:
-        typeof data.timezone === "string" && data.timezone.trim()
-          ? data.timezone.trim()
-          : DEFAULT_MEDICINE_REMINDER.timezone,
+      timezone,
       repeat: "daily",
       enabled:
         typeof data.enabled === "boolean"
           ? data.enabled
-          : existing?.enabled ?? DEFAULT_MEDICINE_REMINDER.enabled,
-      targetDeviceId:
-        typeof data.targetDeviceId === "string" && data.targetDeviceId.trim()
-          ? data.targetDeviceId.trim()
-          : DEFAULT_MEDICINE_REMINDER.targetDeviceId,
-      lastTriggeredDate:
-        data.lastTriggeredDate ??
-        existing?.lastTriggeredDate ??
-        DEFAULT_MEDICINE_REMINDER.lastTriggeredDate,
-      lastTriggeredAt:
-        data.lastTriggeredAt ??
-        existing?.lastTriggeredAt ??
-        DEFAULT_MEDICINE_REMINDER.lastTriggeredAt,
-      updatedAt: realtimeServerTs(),
+          : existing?.enabled ?? true,
+      targetDeviceId,
     };
+  }
 
-    if (existing?.createdAt) {
-      payload.createdAt = existing.createdAt;
-    } else {
-      payload.createdAt = realtimeServerTs();
+  async function listMedicineReminders() {
+    if (useRealtime) {
+      return normalizeMedicineReminderList(
+        await getRealtimeValue("reminders"),
+      );
+    }
+    return getLocalMedicineReminders();
+  }
+
+  function listenMedicineReminders(callback) {
+    if (typeof callback !== "function") {
+      throw new Error("Medicine reminder callback is required");
+    }
+    listeners.medicine_reminders.push(callback);
+
+    if (useRealtime) {
+      const ref = db.ref("reminders");
+      const handler = (snapshot) => {
+        callback(normalizeMedicineReminderList(snapshot.val()));
+      };
+      ref.on("value", handler, (error) => {
+        console.warn("Medicine reminder listener error", error);
+        callback([]);
+      });
+      return () => {
+        ref.off("value", handler);
+        const index = listeners.medicine_reminders.indexOf(callback);
+        if (index > -1) listeners.medicine_reminders.splice(index, 1);
+      };
     }
 
-    return Object.fromEntries(
-      Object.entries(payload).filter(([, value]) => value !== undefined),
+    callback(getLocalMedicineReminders());
+    return () => {
+      const index = listeners.medicine_reminders.indexOf(callback);
+      if (index > -1) listeners.medicine_reminders.splice(index, 1);
+    };
+  }
+
+  async function getMedicineReminder(reminderId) {
+    const safeId = assertMedicineReminderId(reminderId);
+    if (useRealtime) {
+      const data = await getRealtimeValue(`reminders/${safeId}`);
+      return data?.type === "medicine" ? { ...data, id: safeId } : null;
+    }
+    return (
+      getLocalMedicineReminders().find((reminder) => reminder.id === safeId) ||
+      null
     );
   }
 
-  async function getMedicineReminder(reminderId = DEFAULT_MEDICINE_REMINDER_ID) {
+  async function createMedicineReminder(data) {
+    const timestamp = realtimeServerTs();
     if (useRealtime) {
-      const data = await getRealtimeValue(`reminders/${reminderId}`);
-      return data ? { id: reminderId, ...data } : null;
+      const ref = db.ref("reminders").push();
+      const reminderId = ref.key;
+      const payload = {
+        ...sanitizeMedicineReminderData(data),
+        id: reminderId,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+      await ref.set(payload);
+      return { ...payload, id: reminderId };
     }
 
-    return getLocalMedicineReminder(reminderId);
+    const reminderId = `medicine_${Date.now()}_${Math.random()
+      .toString(36)
+      .slice(2, 8)}`;
+    const payload = {
+      ...sanitizeMedicineReminderData(data),
+      id: reminderId,
+      createdAt: serverTs(),
+      updatedAt: serverTs(),
+    };
+    const reminders = readLocal("mock:reminders") || {};
+    reminders[reminderId] = payload;
+    writeLocal("mock:reminders", reminders);
+    notifyLocalMedicineReminders();
+    return payload;
   }
 
-  async function saveMedicineReminder(
-    data,
-    reminderId = DEFAULT_MEDICINE_REMINDER_ID,
-  ) {
-    const existing = await getMedicineReminder(reminderId);
-    const payload = sanitizeMedicineReminderData(data, existing);
+  async function updateMedicineReminder(reminderId, data) {
+    const safeId = assertMedicineReminderId(reminderId);
+    const existing = await getMedicineReminder(safeId);
+    if (!existing) {
+      throw new Error("Medicine reminder not found");
+    }
 
+    const payload = {
+      ...sanitizeMedicineReminderData(data, existing),
+      id: safeId,
+      createdAt: existing.createdAt || realtimeServerTs(),
+      updatedAt: realtimeServerTs(),
+    };
     if (useRealtime) {
-      await setRealtimeValue(`reminders/${reminderId}`, payload);
-      return { id: reminderId, ...payload };
+      await updateRealtimeValue(`reminders/${safeId}`, payload);
+      return { ...existing, ...payload, id: safeId };
     }
 
     const reminders = readLocal("mock:reminders") || {};
-    reminders[reminderId] = {
-      ...(existing || {}),
+    reminders[safeId] = {
+      ...existing,
       ...payload,
-      createdAt: existing?.createdAt || serverTs(),
+      createdAt: existing.createdAt || serverTs(),
       updatedAt: serverTs(),
     };
-    delete reminders[reminderId].id;
     writeLocal("mock:reminders", reminders);
-    notifyLocalMedicineReminder(reminderId);
-    return { id: reminderId, ...reminders[reminderId] };
+    notifyLocalMedicineReminders();
+    return { ...reminders[safeId], id: safeId };
   }
 
-  async function setMedicineReminderEnabled(
-    enabled,
-    reminderId = DEFAULT_MEDICINE_REMINDER_ID,
-  ) {
-    const existing = await getMedicineReminder(reminderId);
-    const base = existing || DEFAULT_MEDICINE_REMINDER;
-    return saveMedicineReminder({ ...base, enabled: Boolean(enabled) }, reminderId);
+  async function setMedicineReminderEnabled(reminderId, enabled) {
+    return updateMedicineReminder(reminderId, { enabled: Boolean(enabled) });
   }
 
-  async function hasPendingMedicineReminderCommand(target = "chami_001") {
+  async function deleteMedicineReminder(reminderId) {
+    const safeId = assertMedicineReminderId(reminderId);
+    if (useRealtime) {
+      await db.ref(`reminders/${safeId}`).remove();
+      return;
+    }
+
+    const reminders = readLocal("mock:reminders") || {};
+    delete reminders[safeId];
+    writeLocal("mock:reminders", reminders);
+    notifyLocalMedicineReminders();
+  }
+
+  async function getPendingMedicineReminderState(reminder) {
     const commands = await listCommands();
-    return commands.some(
+    const target = reminder.targetDeviceId || "chami_001";
+    const pending = commands.filter(
       (command) =>
         command?.target === target &&
         command?.action === "remind_medicine" &&
-        (command?.status || "pending") === "pending",
+        command?.status === "pending",
+    );
+    if (pending.some((command) => command.reminderId === reminder.id)) {
+      return "pending_same_reminder";
+    }
+    return pending.length > 0 ? "robot_busy" : null;
+  }
+
+  async function hasPendingMedicineReminderCommand(
+    target = "chami_001",
+    reminderId = "",
+  ) {
+    return Boolean(
+      await getPendingMedicineReminderState({
+        id: reminderId,
+        targetDeviceId: target,
+      }),
     );
   }
 
-  async function createMedicineReminderCommand(options = {}) {
-    const target = options.targetDeviceId || options.target || "chami_001";
-
-    if (await hasPendingMedicineReminderCommand(target)) {
-      console.log("Medicine reminder command already pending for Chami");
-      return { skipped: true, reason: "pending_command" };
+  async function createMedicineReminderCommand(reminder) {
+    if (!reminder || typeof reminder !== "object") {
+      throw new Error("Medicine reminder is required");
+    }
+    const reminderId = assertMedicineReminderId(reminder.id);
+    const medicineName = String(reminder.medicineName || "").trim();
+    if (!medicineName) {
+      throw new Error("medicineName is required");
     }
 
-    const medicineName =
-      typeof options.medicineName === "string" && options.medicineName.trim()
-        ? options.medicineName.trim()
-        : DEFAULT_MEDICINE_REMINDER.medicineName;
-    const text =
-      options.text || `Đã đến giờ uống thuốc: ${medicineName}`;
+    const pendingReason = await getPendingMedicineReminderState(reminder);
+    if (pendingReason) {
+      return { skipped: true, reason: pendingReason };
+    }
 
-    const command = await createRobotActionCommand(
-      target,
-      "remind_medicine",
-      text,
-      {
-        source: options.source || "dashboard",
-        status: "pending",
-        createdAt: options.createdAt || realtimeServerTs(),
-      },
-    );
+    const payload = {
+      source: "dashboard",
+      target: reminder.targetDeviceId || "chami_001",
+      type: "robot_action",
+      action: "remind_medicine",
+      reminderId,
+      medicineName,
+      text: `Đã đến giờ uống thuốc: ${medicineName}`,
+      status: "pending",
+      createdAt: realtimeServerTs(),
+    };
 
+    if (useRealtime) {
+      const command = await pushRealtimeValue("commands", payload);
+      return { skipped: false, command };
+    }
+
+    const commands = readLocal("mock:commands") || [];
+    const command = {
+      id: `cmd_${Date.now()}`,
+      ...payload,
+      createdAt: serverTs(),
+    };
+    commands.unshift(command);
+    writeLocal("mock:commands", commands);
+    notifyLocal("commands");
     return { skipped: false, command };
+  }
+
+  function listenMedicineReminder(callback, reminderId) {
+    const safeId = assertMedicineReminderId(reminderId);
+    return listenMedicineReminders((reminders) => {
+      callback(
+        reminders.find((reminder) => reminder.id === safeId) || null,
+      );
+    });
+  }
+
+  async function saveMedicineReminder(data, reminderId) {
+    return updateMedicineReminder(reminderId, data);
   }
 
   function sanitizeRealtimeKey(value) {
@@ -1081,13 +1213,18 @@ const FirebaseService = (function () {
     subscribeToCareEvents,
     subscribeToCommands,
     listenMedicineReminder,
+    listenMedicineReminders,
     getRobot,
     setRobot,
     listDevices,
     listCommands,
+    listMedicineReminders,
     getMedicineReminder,
     saveMedicineReminder,
+    createMedicineReminder,
+    updateMedicineReminder,
     setMedicineReminderEnabled,
+    deleteMedicineReminder,
     hasPendingMedicineReminderCommand,
     updateCommandStatus,
     createCommand,
