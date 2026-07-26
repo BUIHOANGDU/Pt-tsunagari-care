@@ -747,27 +747,19 @@ function renderMedicineReminders(reminders) {
 
   latestMedicineReminders.forEach((reminder) => {
     const row = document.createElement("article");
-    row.className = "medicine-reminder-row";
+    row.className = "medicine-reminder-row medicine-alarm-item";
     if (reminder.enabled === false) row.classList.add("is-disabled");
     row.dataset.reminderId = reminder.id;
 
-    const schedule = document.createElement("div");
-    schedule.className = "medicine-reminder-schedule";
+    const top = document.createElement("div");
+    top.className = "medicine-alarm-top";
     const time = document.createElement("time");
+    time.className = "medicine-alarm-time";
     time.dateTime = reminder.time || "";
     time.textContent = reminder.time || "--:--";
-    const details = document.createElement("div");
-    const name = document.createElement("strong");
-    name.textContent = reminder.medicineName || "Thuốc";
-    const repeat = document.createElement("span");
-    repeat.textContent = "Hằng ngày";
-    details.append(name, repeat);
-    schedule.append(time, details);
 
-    const controls = document.createElement("div");
-    controls.className = "medicine-reminder-controls";
     const toggle = document.createElement("label");
-    toggle.className = "medicine-list-toggle";
+    toggle.className = "medicine-list-toggle medicine-alarm-toggle";
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
     checkbox.checked = reminder.enabled !== false;
@@ -780,9 +772,22 @@ function renderMedicineReminders(reminders) {
     const toggleText = document.createElement("span");
     toggleText.textContent = checkbox.checked ? "Bật" : "Tắt";
     toggle.append(checkbox, toggleText);
+    top.append(time, toggle);
+
+    const name = document.createElement("div");
+    name.className = "medicine-alarm-name";
+    name.textContent = reminder.medicineName || "Thuốc";
+
+    const meta = document.createElement("div");
+    meta.className = "medicine-alarm-meta";
+    const repeat = document.createElement("span");
+    repeat.textContent = "Hằng ngày";
+    const timezone = document.createElement("span");
+    timezone.textContent = reminder.timezone || "Asia/Tokyo";
+    meta.append(repeat, timezone);
 
     const actions = document.createElement("div");
-    actions.className = "medicine-reminder-actions";
+    actions.className = "medicine-reminder-actions medicine-alarm-actions";
     actions.append(
       createMedicineActionButton("edit", reminder.id, "Sửa"),
       createMedicineActionButton(
@@ -798,7 +803,6 @@ function renderMedicineReminders(reminders) {
         "primary",
       ),
     );
-    controls.append(toggle, actions);
 
     if (reminder.lastTriggeredAt) {
       const lastTriggered = document.createElement("small");
@@ -806,10 +810,10 @@ function renderMedicineReminders(reminders) {
       lastTriggered.textContent = `Lần gần nhất: ${formatDateTime(
         reminder.lastTriggeredAt,
       )}`;
-      details.appendChild(lastTriggered);
+      meta.appendChild(lastTriggered);
     }
 
-    row.append(schedule, controls);
+    row.append(top, name, meta, actions);
     list.appendChild(row);
   });
 

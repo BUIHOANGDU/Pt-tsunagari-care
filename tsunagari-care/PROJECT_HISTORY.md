@@ -1110,3 +1110,84 @@ firmware, Firebase config/Rules, fall detection, emergency flow hoac smart home.
   trong session nay khong render duoc.
 - De lien ket follow-up chinh xac trong he nhieu lich, firmware can gui
   `reminderId` nhan duoc tu command trong payload ket qua o mot thay doi rieng.
+
+## 2026-07-26 18:03:36 +09:00
+
+### Muc tieu lan sua
+
+Sua khan cap card Medication Reminder bi co hep, ten thuoc bi be tung ky tu va
+gio/toggle/actions bi don vao mot hang tren dashboard ba cot.
+
+### Nguyen nhan chinh xac
+
+- `.secondary-row` cho phep cot Medication co xuong `260px` va van giu ba cot
+  cho den breakpoint `980px`.
+- `.medicine-reminder-row` dat schedule va controls trong grid ngang
+  `minmax(0, 1fr) auto`. Cot controls chua toggle va ba button lay do rong auto,
+  nen phan schedule/name con lai bi ep rat hep.
+- `.medicine-reminder-schedule strong` bi ap `overflow-wrap: anywhere`, vi vay
+  khi cot ten hep, trinh duyet co quyen be chu sau tung ky tu.
+- Markup dong gom gio, ten, meta, toggle va actions vao hai khoi nam cung mot
+  hang, khong phu hop voi card alarm nho.
+
+### File da sua
+
+- `src/js/dashboard.js`
+- `src/css/style.css`
+- `PROJECT_HISTORY.md`
+
+`index.html` da duoc kiem tra; cac ID container/modal dung nen khong can sua.
+Khong sua FirebaseService, backend, scheduler, firmware, data model hoac handler
+CRUD.
+
+### Markup va CSS moi
+
+- Moi reminder duoc tach thanh bon hang:
+  - `.medicine-alarm-top`: gio lon ben trai, toggle ben phai.
+  - `.medicine-alarm-name`: ten thuoc rieng, toi da hai dong.
+  - `.medicine-alarm-meta`: `Hang ngay`, timezone va lan trigger gan nhat.
+  - `.medicine-alarm-actions`: Sua, Xoa, Nhac ngay.
+- Ten thuoc dung `word-break: normal`, `overflow-wrap: break-word` va line-clamp
+  hai dong; khong con `overflow-wrap: anywhere`.
+- Item dung flex column, width 100%, min-width 0, padding 14px va border-radius
+  8px; khong co fixed height.
+- Actions wrap, moi button co flex basis hop ly va `min-width: 0`, khong lam card
+  rong hon parent.
+- Cac `data-medicine-action`, `data-reminder-id`, toggle/edit/delete/now listener
+  va DOM ID khong thay doi.
+
+### Responsive
+
+- Desktop tu 1200px: ba cot co min-width lan luot 340px, 360px va 300px.
+- Tablet 768-1199px: hai cot; Medication Reminder chiem full row, Care Log va
+  Command Queue nam hai cot ben duoi.
+- Mobile duoi 768px: mot cot. Duoi 640px header card xep doc va action button co
+  the co gian/wrap trong card.
+- Khong thay doi layout noi bo cua Care Log hoac Command Queue.
+
+### Kiem tra truc quan
+
+- Edge headless software rendering tai 1920px: pass; ba reminder nam gon trong
+  cot dau, ten khong be ky tu, toggle va actions khong tran.
+- Tai 1024px: pass; Medication chiem full row va ba reminder gon, hai card con
+  lai tao hai cot.
+- Tai CSS viewport 500px: pass; mot cot, toggle goc phai, ten nam ngang va ba
+  button nam tron trong card.
+- Edge headless co minimum layout viewport gan 500px khi yeu cau anh 390px, nen
+  anh 390px bi crop tu layout 500px; khong dung anh nay de ket luan overflow.
+
+### Test thu cong tren trinh duyet
+
+1. `Ctrl+F5` dashboard.
+2. Tao ba ten: `Thuoc huyet ap`, `Vitamin tong hop buoi toi`,
+   `Thuoc da day sau an`.
+3. Kiem tra ten toi da hai dong, khong be tung ky tu; gio lon va toggle o goc
+   phai.
+4. Kiem tra Sua/Xoa/Nhac ngay khong tran card va van goi dung handler.
+5. Test 1920x1080, tablet va mobile; kiem tra `scrollWidth === clientWidth`.
+
+### Gioi han
+
+- Test headless dung localStorage fixture, khong ghi RTDB va khong test CRUD
+  end-to-end voi Firebase that.
+- Khong ghi token, credential hoac secret.

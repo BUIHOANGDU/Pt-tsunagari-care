@@ -580,7 +580,10 @@ a:focus-visible,
 }
 
 .secondary-row {
-  grid-template-columns: minmax(260px, 0.9fr) minmax(0, 1fr) minmax(320px, 0.78fr);
+  grid-template-columns:
+    minmax(340px, 1fr)
+    minmax(360px, 1.2fr)
+    minmax(300px, 0.9fr);
 }
 
 .panel-card {
@@ -816,77 +819,90 @@ a:focus-visible,
 }
 
 .medicine-reminder-list {
-  border-bottom: 1px solid var(--line);
-  border-top: 1px solid var(--line);
-}
-
-.medicine-reminder-row {
-  align-items: center;
-  display: grid;
-  gap: 18px;
-  grid-template-columns: minmax(0, 1fr) auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
   min-width: 0;
-  padding: 16px 0;
+  width: 100%;
 }
 
-.medicine-reminder-row + .medicine-reminder-row {
-  border-top: 1px solid var(--line);
+.medicine-alarm-item {
+  background: var(--surface-muted);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding: 14px;
+  width: 100%;
 }
 
-.medicine-reminder-row.is-disabled .medicine-reminder-schedule {
+.medicine-alarm-item.is-disabled {
+  background: #f7f9f8;
+}
+
+.medicine-alarm-item.is-disabled .medicine-alarm-time,
+.medicine-alarm-item.is-disabled .medicine-alarm-name,
+.medicine-alarm-item.is-disabled .medicine-alarm-meta {
   opacity: 0.52;
 }
 
-.medicine-reminder-schedule {
-  align-items: center;
-  display: flex;
-  gap: 16px;
-  min-width: 0;
-}
-
-.medicine-reminder-schedule time {
-  color: var(--text);
-  flex: 0 0 88px;
-  font-size: 2rem;
-  font-weight: 800;
-  line-height: 1;
-}
-
-.medicine-reminder-schedule > div {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-}
-
-.medicine-reminder-schedule strong,
-.medicine-reminder-schedule span,
-.medicine-reminder-last-triggered {
-  overflow-wrap: anywhere;
-}
-
-.medicine-reminder-schedule strong {
-  font-size: 0.96rem;
-}
-
-.medicine-reminder-schedule span,
-.medicine-reminder-last-triggered {
-  color: var(--muted);
-  font-size: 0.76rem;
-  font-weight: 700;
-}
-
-.medicine-reminder-controls {
+.medicine-alarm-top {
   align-items: center;
   display: flex;
   gap: 12px;
-  justify-content: flex-end;
+  justify-content: space-between;
+  width: 100%;
 }
 
-.medicine-list-toggle {
+.medicine-alarm-time {
+  color: var(--text);
+  flex: 0 0 auto;
+  font-size: 2rem;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.medicine-alarm-name {
+  display: -webkit-box;
+  font-size: 0.96rem;
+  font-weight: 800;
+  line-height: 1.4;
+  max-width: 100%;
+  overflow: hidden;
+  overflow-wrap: break-word;
+  text-overflow: ellipsis;
+  white-space: normal;
+  word-break: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.medicine-alarm-meta {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 0.76rem;
+  font-weight: 700;
+  gap: 6px 12px;
+  min-width: 0;
+}
+
+.medicine-reminder-last-triggered {
+  flex: 1 1 100%;
+  overflow-wrap: break-word;
+}
+
+.medicine-alarm-toggle {
   align-items: center;
   display: inline-flex;
+  flex: 0 0 auto;
   gap: 7px;
-  min-width: 72px;
+  justify-content: flex-end;
 }
 
 .medicine-list-toggle input {
@@ -933,16 +949,20 @@ a:focus-visible,
   font-weight: 800;
 }
 
-.medicine-reminder-actions {
+.medicine-alarm-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  justify-content: flex-end;
+  gap: 8px;
+  width: 100%;
 }
 
-.medicine-reminder-actions button {
+.medicine-alarm-actions button {
+  flex: 1 1 82px;
   min-height: 34px;
+  min-width: 0;
   padding: 7px 10px;
+  white-space: nowrap;
+  width: auto;
 }
 
 .medicine-delete-button {
@@ -1638,10 +1658,19 @@ a:focus-visible,
   text-align: center;
 }
 
+@media (max-width: 1199px) {
+  .secondary-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .medicine-reminder-card {
+    grid-column: 1 / -1;
+  }
+}
+
 @media (max-width: 980px) {
   .hero-section,
-  .primary-row,
-  .secondary-row {
+  .primary-row {
     grid-template-columns: 1fr;
   }
 
@@ -1659,6 +1688,16 @@ a:focus-visible,
 
   .fall-response-timeline {
     grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  }
+}
+
+@media (max-width: 767px) {
+  .secondary-row {
+    grid-template-columns: 1fr;
+  }
+
+  .medicine-reminder-card {
+    grid-column: auto;
   }
 }
 
@@ -1699,41 +1738,25 @@ a:focus-visible,
     grid-template-columns: 1fr;
   }
 
-  .medicine-reminder-card .section-heading,
-  .medicine-reminder-row,
-  .medicine-reminder-controls {
-    align-items: stretch;
-  }
-
-  .medicine-reminder-card .section-heading,
-  .medicine-reminder-row {
-    grid-template-columns: 1fr;
-  }
-
   .medicine-reminder-card .section-heading {
+    align-items: stretch;
     display: grid;
     gap: 12px;
+    grid-template-columns: 1fr;
   }
 
   .medicine-reminder-add {
     width: 100%;
   }
 
-  .medicine-reminder-controls {
-    flex-direction: column;
-  }
-
-  .medicine-list-toggle {
-    justify-content: flex-start;
-  }
-
-  .medicine-reminder-actions {
+  .medicine-alarm-actions {
     justify-content: flex-start;
     width: 100%;
   }
 
-  .medicine-reminder-actions button {
-    flex: 1 1 auto;
+  .medicine-reminder-card .medicine-alarm-actions button {
+    flex: 1 1 88px;
+    width: auto;
   }
 
   .robot-stats-compact {
