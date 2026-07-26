@@ -574,7 +574,10 @@ a:focus-visible,
 .primary-row,
 .secondary-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(340px, 0.9fr);
+  grid-template-columns:
+    minmax(280px, 1fr)
+    minmax(340px, 1fr)
+    minmax(300px, 0.86fr);
   gap: 18px;
   align-items: stretch;
 }
@@ -741,6 +744,7 @@ a:focus-visible,
 .device-item,
 .care-item,
 .alert-item,
+.caregiver-notification-item,
 .commands-item {
   border: 1px solid rgba(219, 228, 225, 0.92);
   border-radius: 8px;
@@ -755,6 +759,7 @@ a:focus-visible,
 .device-item:hover,
 .care-item:hover,
 .alert-item:hover,
+.caregiver-notification-item:hover,
 .commands-item:hover {
   border-color: rgba(15, 107, 85, 0.2);
   box-shadow: var(--shadow-sm);
@@ -780,6 +785,7 @@ a:focus-visible,
 .device-item small,
 .timeline-time,
 .commands-item small,
+.caregiver-notification-item small,
 .alert-item small {
   color: var(--muted);
   font-size: 0.82rem;
@@ -798,6 +804,7 @@ a:focus-visible,
 
 .alerts-compact,
 .timeline-compact,
+.caregiver-notifications-list,
 .commands-compact {
   display: grid;
   gap: 10px;
@@ -810,6 +817,15 @@ a:focus-visible,
 
 .commands-compact {
   max-height: 156px;
+  overflow: hidden;
+}
+
+.caregiver-notifications-card {
+  min-height: 0;
+}
+
+.caregiver-notifications-list {
+  max-height: 230px;
   overflow: hidden;
 }
 
@@ -1139,6 +1155,7 @@ a:focus-visible,
 }
 
 .alert-item small,
+.caregiver-notification-item small,
 .commands-item small {
   display: -webkit-box;
   overflow: hidden;
@@ -1151,6 +1168,62 @@ a:focus-visible,
   font-size: 0.78rem;
   font-weight: 800;
   padding: 0 4px;
+}
+
+.caregiver-notification-item {
+  align-items: flex-start;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  padding: 12px;
+}
+
+.caregiver-notification-content {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.caregiver-notification-item strong {
+  color: var(--text);
+  font-size: 0.92rem;
+}
+
+.caregiver-notification-badge {
+  border-radius: 999px;
+  flex: 0 0 auto;
+  font-size: 0.68rem;
+  font-weight: 900;
+  padding: 5px 8px;
+  text-transform: uppercase;
+}
+
+.caregiver-notification-badge.is-sent {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.caregiver-notification-badge.is-partial {
+  background: rgba(245, 158, 11, 0.12);
+  color: #a16207;
+}
+
+.caregiver-notification-badge.is-failed {
+  background: rgba(220, 38, 38, 0.1);
+  color: var(--danger);
+}
+
+.caregiver-notification-badge.is-skipped,
+.caregiver-notification-badge.is-pending {
+  background: var(--surface-muted);
+  color: var(--muted);
+}
+
+.compact-empty {
+  color: var(--muted);
+  font-size: 0.9rem;
+  padding: 12px;
+  text-align: center;
 }
 
 .fall-alert-groups {

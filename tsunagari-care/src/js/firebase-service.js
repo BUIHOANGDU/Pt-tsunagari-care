@@ -14,6 +14,7 @@ const FirebaseService = (function () {
     alerts: [],
     care_logs: [],
     care_events: [],
+    caregiver_notifications: [],
     commands: [],
     medicine_reminders: [],
   };
@@ -24,6 +25,7 @@ const FirebaseService = (function () {
     alerts: null,
     care_logs: null,
     care_events: null,
+    caregiver_notifications: null,
     commands: null,
     medicine_reminders: null,
   };
@@ -172,6 +174,7 @@ const FirebaseService = (function () {
       alerts: "mock:alerts",
       care_logs: "mock:care_logs",
       care_events: "mock:care_events",
+      caregiver_notifications: "mock:caregiver_notifications",
       commands: "mock:commands",
       medicine_reminders: "mock:reminders",
     };
@@ -314,6 +317,69 @@ const FirebaseService = (function () {
     return () => {
       const index = listeners.care_logs.indexOf(emit);
       if (index > -1) listeners.care_logs.splice(index, 1);
+    };
+  }
+
+  function normalizeCaregiverNotifications(value, limit) {
+    return sortByCreatedAtDesc(
+      objectToArray(value)
+        .filter((item) => {
+          const timestamp = normalizeTimestamp(
+            item?.createdAt || item?.sentAt || item?.updatedAt,
+          );
+          const valid =
+            item &&
+            typeof item === "object" &&
+            typeof item.status === "string" &&
+            timestamp > 0;
+          if (!valid) {
+            console.warn("FirebaseService: invalid caregiver notification skipped");
+          }
+          return valid;
+        })
+        .map((item) => ({
+          ...item,
+          timestamp: normalizeTimestamp(
+            item.createdAt || item.sentAt || item.updatedAt,
+          ),
+        })),
+    ).slice(0, limit);
+  }
+
+  function listenCaregiverNotifications(callback, limit = 10) {
+    const safeLimit = Math.min(Math.max(Number(limit) || 10, 1), 50);
+
+    if (useRealtime) {
+      const query = db
+        .ref("caregiver_notifications")
+        .orderByChild("createdAt")
+        .limitToLast(safeLimit);
+      const handler = (snapshot) => {
+        const data = normalizeCaregiverNotifications(snapshot.val(), safeLimit);
+        console.log(
+          `Dashboard: caregiver notifications loaded count=${data.length}`,
+        );
+        callback(data);
+      };
+      query.on("value", handler, (error) => {
+        console.warn("Caregiver notification listener error", error);
+        callback([]);
+      });
+      return () => query.off("value", handler);
+    }
+
+    const emit = (records) => {
+      const data = normalizeCaregiverNotifications(records, safeLimit);
+      console.log(
+        `Dashboard: caregiver notifications loaded count=${data.length}`,
+      );
+      callback(data);
+    };
+    listeners.caregiver_notifications.push(emit);
+    emit(JSON.parse(localStorage.getItem("mock:caregiver_notifications") || "[]"));
+    return () => {
+      const index = listeners.caregiver_notifications.indexOf(emit);
+      if (index > -1) listeners.caregiver_notifications.splice(index, 1);
     };
   }
 
@@ -1183,6 +1249,10 @@ const FirebaseService = (function () {
       ]);
     }
 
+    if (!localStorage.getItem("mock:caregiver_notifications")) {
+      writeLocal("mock:caregiver_notifications", []);
+    }
+
     if (!localStorage.getItem("mock:robots:chami01")) {
       writeLocal("mock:robots:chami01", {
         id: "chami01",
@@ -1210,6 +1280,7 @@ const FirebaseService = (function () {
     subscribeToAlerts,
     subscribeToCareLogs,
     listenMedicineCareLogs,
+    listenCaregiverNotifications,
     subscribeToCareEvents,
     subscribeToCommands,
     listenMedicineReminder,

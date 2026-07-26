@@ -1191,3 +1191,135 @@ CRUD.
 - Test headless dung localStorage fixture, khong ghi RTDB va khong test CRUD
   end-to-end voi Firebase that.
 - Khong ghi token, credential hoac secret.
+
+## 2026-07-26 19:45:28 +09:00
+
+### Muc tieu lan sua
+
+Them phase thong bao nguoi cham soc qua LINE Official Account va LINE Messaging
+API. Khong dung LINE Notify, khong gui LINE tu browser hoac firmware, va token
+chi doc tu bien moi truong backend.
+
+### File da sua
+
+- `server/lib/lineMessagingService.js`
+- `server/lib/caregiverNotificationService.js`
+- `server/routes/chami.js`
+- `tsunagari-care/index.html`
+- `tsunagari-care/src/css/style.css`
+- `tsunagari-care/src/js/firebase-service.js`
+- `tsunagari-care/src/js/dashboard.js`
+- `tsunagari-care/PROJECT_HISTORY.md`
+
+Repo root `.env.example` dang bi xoa san trong worktree truoc phase nay, nen
+khong khoi phuc de tranh ghi de thay doi ngoai pham vi.
+
+### Env vars backend
+
+- `LINE_MESSAGING_ENABLED=true`
+- `LINE_CHANNEL_ACCESS_TOKEN=<LINE Messaging API channel access token>`
+- `LINE_CAREGIVER_USER_IDS=Uxxxx,Uyyyy`
+- `LINE_NOTIFICATION_DEMO_ENABLED=false`
+
+Danh sach recipient duoc split bang dau phay, trim khoang trang va bo gia tri
+rong. Log chi ghi so luong recipient va masked user ID khi gui, khong log token
+hoac Authorization header.
+
+### Policy va message mapping
+
+Chi gui LINE cho:
+
+- `fall_confirmed`
+- `danger`
+- `emergency_no_response`
+- `medicine_no_response`
+
+Bo qua:
+
+- `medicine_reminder_sent`
+- `medicine_taken`
+- smart-home commands
+- robot heartbeat/state
+- event ngoai whitelist
+- event source `demo`, tru khi backend chu dong allow demo va
+  `LINE_NOTIFICATION_DEMO_ENABLED=true`
+
+Message MVP bang tieng Viet, gom thoi gian Nhat Ban, nguon, trang thai can
+kiem tra va chi tiet thuoc/attempt khi co. Helper tach rieng de sau nay them
+tieng Nhat.
+
+### Backend trigger
+
+Sau khi `/api/chami/alert` ghi `alerts` va, voi medicine follow-up, ghi
+`care_logs`, backend goi caregiver notification fire-and-forget co `.catch`.
+Loi LINE khong lam mat alert/care log goc va khong lam endpoint treo lau.
+
+Co them `POST /api/chami/line-test`, di qua `deviceAuth`, chi hoat dong khi
+`LINE_NOTIFICATION_DEMO_ENABLED=true`, va chi gui message mau co dinh.
+
+### Dedupe va retry
+
+Dedupe dung transaction tai:
+
+- `line_notification_dedup/{eventId}`
+
+Neu payload co `eventId`, dung eventId do. Neu khong co, medicine dung dedupe
+key backend da tao cho care event; alert legacy dung hash gom type/source/status
+/level/message va timestamp hoac cua so nhan 30 giay. Marker da ton tai thi ghi
+notification `skipped` va khong gui LINE lai.
+
+LINE send retry async cho loi mang, timeout, HTTP 408/429/5xx voi delay 2s, 5s,
+15s. HTTP 400/401/403 khong retry vo han. Neu moi recipient that bai, status
+`failed` va marker cho phep retry co kiem soat o request sau; neu co it nhat mot
+recipient thanh cong thi `sent` hoac `partial`.
+
+### RTDB schema moi
+
+Backend ghi:
+
+- `caregiver_notifications/{notificationId}`
+
+Record gom `id`, `eventId`, `eventType`, `source`, `status`,
+`recipientCount`, `successCount`, `failureCount`, `messagePreview`,
+`createdAt`, `sentAt`, `updatedAt`, `lastError`. Khong luu token, Authorization
+header hoac user ID day du.
+
+### Dashboard
+
+Them panel `Thong bao nguoi cham soc`, doc-only tu `caregiver_notifications`.
+Dashboard hien toi da 3 record moi nhat voi badge Sent / Partial / Failed /
+Skipped, preview va gio, kem `+N thong bao cu hon`. Frontend khong goi LINE API
+va listener dung query limit thay vi doc toan bo RTDB.
+
+### Static checks
+
+Da chay `node --check` cho cac file JS backend/frontend moi sua trong qua trinh
+lam viec. Can chay lai day du cuoi phase sau khi history duoc ghi:
+
+- `node --check server/lib/lineMessagingService.js`
+- `node --check server/lib/caregiverNotificationService.js`
+- `node --check server/routes/chami.js`
+- `node --check server/index.js`
+- `node --check tsunagari-care/src/js/firebase-service.js`
+- `node --check tsunagari-care/src/js/dashboard.js`
+- `git diff --check`
+
+### Manual tests can lam
+
+- Chua cau hinh LINE: server khong crash, alert/care log van ghi, notification
+  failed hoac skipped theo policy.
+- Cau hinh token va user ID that: goi `POST /api/chami/line-test` voi
+  `x-device-token`, xac nhan LINE nhan message va RTDB status `sent`.
+- Gui `medicine_no_response`, `danger`, `emergency_no_response` va duplicate
+  cung eventId de xac nhan chi mot message duoc gui.
+- Token sai: LINE 401 khong crash backend va notification status `failed`.
+- Event `medicine_taken` khong tao notification sent gia.
+
+### Gioi han va next steps
+
+- MVP chua co background worker khoi phuc pending notification sau Render
+  restart.
+- Chua test voi LINE that trong session nay vi khong co token/user ID that.
+- Next phase nen them unit test cho policy/message formatter va Firebase mock
+  dedupe, sau do can nhac job retry ben vung neu van can dam bao delivery sau
+  restart.

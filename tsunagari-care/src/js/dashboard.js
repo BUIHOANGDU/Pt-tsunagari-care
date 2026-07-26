@@ -11,6 +11,7 @@ const DEFAULT_TSUNAGARI_BRIDGE_API_URL =
 const DEFAULT_TSUNAGARI_DEVICE_TOKEN = "DEV_TOKEN";
 const CARE_LOG_DISPLAY_LIMIT = 3;
 const ALERT_DISPLAY_LIMIT = 1;
+const CAREGIVER_NOTIFICATION_DISPLAY_LIMIT = 3;
 const PENDING_COMMAND_DISPLAY_LIMIT = 2;
 const RESOLVED_FALL_HISTORY_LIMIT = 3;
 const ROBOT_OFFLINE_TIMEOUT_MS = 90 * 1000;
@@ -342,6 +343,10 @@ function updateCareLogsSection(logs) {
   renderCareLogs(logs);
 }
 
+function updateCaregiverNotificationsSection(records) {
+  renderCaregiverNotifications(records);
+}
+
 // Render helpers
 function renderDevices(devices) {
   const wrap = document.getElementById("devices-list");
@@ -503,6 +508,75 @@ function getLineStatusLabel(status) {
   };
 
   return labels[status] || "LINE: Demo";
+}
+
+function getCaregiverNotificationStatus(record) {
+  const status = String(record?.status || "").toLowerCase();
+  if (status === "sent") {
+    return { label: "Đã gửi LINE", badge: "Sent", className: "is-sent" };
+  }
+  if (status === "partial") {
+    return { label: "Gửi một phần", badge: "Partial", className: "is-partial" };
+  }
+  if (status === "failed") {
+    return { label: "Gửi thất bại", badge: "Failed", className: "is-failed" };
+  }
+  if (status === "skipped") {
+    return { label: "Bỏ qua trùng", badge: "Skipped", className: "is-skipped" };
+  }
+  return { label: "Đang gửi LINE", badge: "Pending", className: "is-pending" };
+}
+
+function renderCaregiverNotifications(records) {
+  const el = document.getElementById("caregiver-notifications-list");
+  if (!el) return;
+  el.innerHTML = "";
+
+  const sorted = sortByNewest(records || [], (record) =>
+    getTimeValue(record.createdAt || record.sentAt || record.updatedAt),
+  );
+  const visible = sorted.slice(0, CAREGIVER_NOTIFICATION_DISPLAY_LIMIT);
+  const hiddenCount = Math.max(sorted.length - visible.length, 0);
+
+  if (visible.length === 0) {
+    el.innerHTML =
+      '<div class="empty-state compact-empty">Chưa có thông báo LINE</div>';
+    return;
+  }
+
+  visible.forEach((record) => {
+    const presentation = getCaregiverNotificationStatus(record);
+    const item = document.createElement("div");
+    item.className = `caregiver-notification-item ${presentation.className}`;
+
+    const content = document.createElement("div");
+    content.className = "caregiver-notification-content";
+
+    const title = document.createElement("strong");
+    title.textContent = presentation.label;
+
+    const detail = document.createElement("small");
+    const failed = String(record.status || "").toLowerCase() === "failed";
+    const detailText =
+      (failed && record.lastError) ||
+      record.messagePreview ||
+      record.lastError ||
+      record.eventType ||
+      "Thông báo người chăm sóc";
+    detail.textContent = `${detailText} • ${formatMedicineTime(
+      record.sentAt || record.createdAt || record.updatedAt,
+    )}`;
+
+    const badge = document.createElement("span");
+    badge.className = `caregiver-notification-badge ${presentation.className}`;
+    badge.textContent = presentation.badge;
+
+    content.append(title, detail);
+    item.append(content, badge);
+    el.appendChild(item);
+  });
+
+  appendCompactMore(el, hiddenCount, "thông báo cũ hơn");
 }
 
 function getTimeValue(value) {
@@ -2347,6 +2421,12 @@ if (typeof FirebaseService.listenMedicineCareLogs === "function") {
     );
     renderLatestMedicineFollowup();
   }, 50);
+}
+
+if (typeof FirebaseService.listenCaregiverNotifications === "function") {
+  FirebaseService.listenCaregiverNotifications((data) => {
+    updateCaregiverNotificationsSection(data || []);
+  }, 10);
 }
 
 if (typeof FirebaseService.subscribeToCareEvents === "function") {

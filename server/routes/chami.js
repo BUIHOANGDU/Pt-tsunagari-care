@@ -3,6 +3,10 @@ const crypto = require("crypto");
 
 const deviceAuth = require("../middleware/deviceAuth");
 const { getDb, getServerTimestamp } = require("../firebaseAdmin");
+const {
+  notifyCaregiversForEvent,
+  notifyCaregiversForEventAsync,
+} = require("../lib/caregiverNotificationService");
 
 const router = express.Router();
 const MEDICINE_EVENT_TYPES = new Set([
@@ -113,6 +117,23 @@ function buildMedicineDedupeKey(
     event.source,
     event.reminderId,
     event.attempt ?? event.attempts ?? "",
+    timestampPart,
+  ].join("|");
+  return `hash_${crypto.createHash("sha256").update(raw).digest("hex")}`;
+}
+
+function buildAlertDedupeKey(event, eventId, timestampWasSupplied, dedupeCreatedAt) {
+  if (eventId) return `event_${eventId}`;
+
+  const timestampPart = timestampWasSupplied
+    ? String(dedupeCreatedAt)
+    : `received-window-${Math.floor(dedupeCreatedAt / 30000)}`;
+  const raw = [
+    event.type,
+    event.source,
+    event.status,
+    event.level,
+    event.message,
     timestampPart,
   ].join("|");
   return `hash_${crypto.createHash("sha256").update(raw).digest("hex")}`;
@@ -287,6 +308,15 @@ async function writeMedicineFollowup(req, res) {
 
     console.log(`[MedicineFollowup] alert created id=${alertRef.key}`);
     console.log(`[MedicineFollowup] care log created id=${careLogRef.key}`);
+    notifyCaregiversForEventAsync({
+      ...event,
+      id: careLogRef.key,
+      eventId: eventId || dedupeKey,
+      dedupeKey,
+      alertId: alertRef.key,
+      careLogId: careLogRef.key,
+      receivedAt: Date.now(),
+    });
     return res.json({
       ok: true,
       duplicate: false,
@@ -364,23 +394,85 @@ router.post("/alert", deviceAuth, async (req, res) => {
     level,
     message,
     status,
+    eventId: rawEventId,
+    createdAt: rawCreatedAt,
   } = req.body || {};
 
   try {
-    const alertRef = getDb().ref("alerts").push();
+    if (
+      rawEventId !== undefined &&
+      rawEventId !== null &&
+      typeof rawEventId !== "string"
+    ) {
+      return res.status(400).json({ ok: false, error: "eventId must be a string" });
+    }
+    const eventId = typeof rawEventId === "string" ? rawEventId.trim() : "";
+    if (eventId && !SAFE_EVENT_ID_RE.test(eventId)) {
+      return res.status(400).json({ ok: false, error: "Invalid eventId" });
+    }
 
-    await alertRef.set({
+    const parsedCreatedAt = parseEventTimestamp(rawCreatedAt);
+    if (
+      rawCreatedAt !== undefined &&
+      rawCreatedAt !== null &&
+      parsedCreatedAt === null
+    ) {
+      return res.status(400).json({ ok: false, error: "Invalid createdAt" });
+    }
+
+    const db = getDb();
+    const alertRef = db.ref("alerts").push();
+    const normalizedType = cleanString(type, 64, "unknown");
+    const normalizedLevel = normalizeChoice(level, ALERT_LEVELS, "warning");
+    const rawStatus = cleanString(status, 64);
+    const rawMessage = cleanString(message, MAX_MESSAGE_LENGTH);
+    const normalizedStatus = normalizeChoice(status, LEGACY_ALERT_STATUSES, "new");
+    const normalizedEvent = {
       source: cleanString(source, 64, "chami_001"),
-      type: cleanString(type, 64, "unknown"),
-      level: normalizeChoice(level, ALERT_LEVELS, "warning"),
+      type: normalizedType,
+      level: normalizedLevel,
       message: cleanString(
-        message,
+        rawMessage,
         MAX_MESSAGE_LENGTH,
         "Robot Chami sent an alert.",
       ),
-      status: normalizeChoice(status, LEGACY_ALERT_STATUSES, "new"),
-      createdAt: getServerTimestamp(),
+      status: normalizedStatus,
+      createdAt: parsedCreatedAt ?? getServerTimestamp(),
       receivedAt: getServerTimestamp(),
+    };
+    const messageForPolicy = normalizedEvent.message.toLowerCase();
+    const notificationType =
+      normalizedType === "emergency_response" &&
+      (rawStatus === "no_response" ||
+        messageForPolicy.includes("no_response") ||
+        messageForPolicy.includes("no response") ||
+        messageForPolicy.includes("khong co phan hoi"))
+        ? "emergency_no_response"
+        : normalizedType === "emergency_response" &&
+            (rawStatus === "danger" ||
+              ["danger", "emergency"].includes(normalizedLevel))
+          ? "danger"
+          : normalizedType;
+    const dedupeCreatedAt = parsedCreatedAt ?? Date.now();
+    const dedupeKey = buildAlertDedupeKey(
+      { ...normalizedEvent, type: notificationType },
+      eventId,
+      parsedCreatedAt !== null,
+      dedupeCreatedAt,
+    );
+
+    await alertRef.set({
+      id: alertRef.key,
+      ...normalizedEvent,
+    });
+
+    notifyCaregiversForEventAsync({
+      ...normalizedEvent,
+      id: alertRef.key,
+      type: notificationType,
+      eventId: eventId || dedupeKey,
+      dedupeKey,
+      receivedAt: Date.now(),
     });
 
     return res.json({
@@ -394,6 +486,40 @@ router.post("/alert", deviceAuth, async (req, res) => {
     return res.status(500).json({
       ok: false,
       error: error.message,
+    });
+  }
+});
+
+router.post("/line-test", deviceAuth, async (req, res) => {
+  if (process.env.LINE_NOTIFICATION_DEMO_ENABLED !== "true") {
+    return res.status(403).json({
+      ok: false,
+      error: "LINE notification demo is disabled",
+    });
+  }
+
+  try {
+    const result = await notifyCaregiversForEvent({
+      type: "danger",
+      source: "line_demo",
+      eventId: `line_demo_${Date.now()}`,
+      message: "LINE Messaging API demo",
+      createdAt: Date.now(),
+    });
+
+    return res.json({
+      ok: result.successCount > 0,
+      status: result.status,
+      successCount: result.successCount,
+      failureCount: result.failureCount,
+    });
+  } catch (error) {
+    console.error(`[CaregiverNotify] line-test failed: ${error.message}`);
+    return res.status(500).json({
+      ok: false,
+      status: "failed",
+      successCount: 0,
+      failureCount: 0,
     });
   }
 });
