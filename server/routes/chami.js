@@ -13,10 +13,12 @@ const MEDICINE_EVENT_TYPES = new Set([
   "medicine_taken",
   "medicine_no_response",
 ]);
+const HEALTH_CONCERN_TYPE = "health_concern";
 const SAFE_REMINDER_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const SAFE_EVENT_ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
 const MAX_MEDICINE_NAME_LENGTH = 100;
 const MAX_MESSAGE_LENGTH = 300;
+const MAX_HEALTH_TRANSCRIPT_LENGTH = 160;
 const ALERT_LEVELS = new Set([
   "info",
   "success",
@@ -31,6 +33,26 @@ const LEGACY_ALERT_STATUSES = new Set([
   "acknowledged",
   "resolved",
 ]);
+const HEALTH_STATUSES = new Set(["detected"]);
+const HEALTH_LEVELS = new Set(["info", "warning", "danger"]);
+const HEALTH_CATEGORIES = new Set(["health"]);
+const HEALTH_LANGUAGES = new Set(["ja", "vi", "unknown"]);
+const HEALTH_SYMPTOMS = new Set([
+  "fatigue",
+  "headache",
+  "dizziness",
+  "breathing",
+  "chest_pain",
+  "abdominal_pain",
+  "nausea",
+  "sleep_problem",
+  "heart",
+  "weakness_or_numbness",
+  "fever",
+  "fainting",
+  "pain_general",
+  "direct_help",
+]);
 
 function cleanString(value, maxLength, fallback = "") {
   if (typeof value !== "string") return fallback;
@@ -42,6 +64,65 @@ function cleanString(value, maxLength, fallback = "") {
 function normalizeChoice(value, allowed, fallback) {
   const cleaned = cleanString(value, 32);
   return allowed.has(cleaned) ? cleaned : fallback;
+}
+
+function readBooleanEnv(name, fallback = false) {
+  const value = process.env[name];
+  if (value === undefined || value === null || value === "") return fallback;
+  return String(value).trim().toLowerCase() === "true";
+}
+
+function isPlainObject(value) {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  );
+}
+
+function rejectNestedHealthPayload(body) {
+  if (!isPlainObject(body)) {
+    throw new Error("payload must be an object");
+  }
+  for (const [key, value] of Object.entries(body)) {
+    if (value && typeof value === "object") {
+      throw new Error(`${key} must not be an object`);
+    }
+  }
+}
+
+function requireHealthString(body, field, maxLength) {
+  if (typeof body[field] !== "string") {
+    throw new Error(`${field} is required`);
+  }
+  const cleaned = body[field].trim();
+  if (!cleaned) {
+    throw new Error(`${field} is required`);
+  }
+  if (cleaned.length > maxLength) {
+    throw new Error(`${field} is too long`);
+  }
+  return cleaned;
+}
+
+function sha256RealtimeKey(value) {
+  return crypto
+    .createHash("sha256")
+    .update(String(value || ""))
+    .digest("hex");
+}
+
+function isSafeRealtimeId(value) {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= 128 &&
+    !/[.#$/[\]]/.test(value)
+  );
+}
+
+function isHealthConcernLineEnabled() {
+  return readBooleanEnv("HEALTH_CONCERN_LINE_ENABLED", true);
 }
 
 function parseEventTimestamp(value) {
@@ -245,6 +326,268 @@ async function normalizeMedicineEvent(body, db) {
   };
 }
 
+function normalizeHealthConcern(body) {
+  rejectNestedHealthPayload(body);
+
+  const type = requireHealthString(body, "type", 64);
+  if (type !== HEALTH_CONCERN_TYPE) {
+    throw new Error("type must be health_concern");
+  }
+
+  const status = requireHealthString(body, "status", 32);
+  if (!HEALTH_STATUSES.has(status)) {
+    throw new Error("invalid status");
+  }
+
+  const level = requireHealthString(body, "level", 32);
+  if (!HEALTH_LEVELS.has(level)) {
+    throw new Error("invalid level");
+  }
+
+  const category = requireHealthString(body, "category", 32);
+  if (!HEALTH_CATEGORIES.has(category)) {
+    throw new Error("invalid category");
+  }
+
+  const symptom = requireHealthString(body, "symptom", 64);
+  if (!HEALTH_SYMPTOMS.has(symptom)) {
+    throw new Error("invalid symptom");
+  }
+
+  const language = requireHealthString(body, "language", 16);
+  if (!HEALTH_LANGUAGES.has(language)) {
+    throw new Error("invalid language");
+  }
+
+  const eventId = requireHealthString(body, "eventId", 128);
+
+  const message = requireHealthString(body, "message", MAX_MESSAGE_LENGTH);
+  const deviceId = cleanString(
+    body.deviceId,
+    64,
+    cleanString(body.source, 64, "chami_001"),
+  );
+  const event = {
+    eventId,
+    deviceId,
+    type,
+    status,
+    level,
+    category,
+    symptom,
+    message,
+    language,
+    confidence: 0,
+  };
+
+  if (body.confidence !== undefined && body.confidence !== null) {
+    if (
+      typeof body.confidence !== "number" ||
+      !Number.isFinite(body.confidence) ||
+      body.confidence < 0 ||
+      body.confidence > 1
+    ) {
+      throw new Error("confidence must be a number from 0 to 1");
+    }
+    event.confidence = body.confidence;
+  }
+
+  if (body.transcript !== undefined && body.transcript !== null) {
+    if (typeof body.transcript !== "string") {
+      throw new Error("transcript must be a string");
+    }
+    const transcript = body.transcript.trim();
+    if (transcript.length > MAX_HEALTH_TRANSCRIPT_LENGTH) {
+      throw new Error("transcript is too long");
+    }
+    if (readBooleanEnv("HEALTH_CONCERN_STORE_TRANSCRIPT", false) && transcript) {
+      event.transcript = transcript;
+    }
+  }
+
+  return event;
+}
+
+async function writeHealthConcern(req, res) {
+  let event;
+  try {
+    event = normalizeHealthConcern(req.body || {});
+  } catch (error) {
+    console.warn(`[HealthConcern] validation failed: ${error.message}`);
+    return res.status(400).json({
+      ok: false,
+      error: "invalid_health_concern",
+      details: error.message,
+    });
+  }
+
+  const db = getDb();
+  const dedupeKey = sha256RealtimeKey(event.eventId);
+  const dedupeRef = db.ref(`health_concern_dedup/${dedupeKey}`);
+  let lockResult;
+
+  try {
+    lockResult = await dedupeRef.transaction((current) => {
+      if (current) return;
+      return {
+        eventId: event.eventId,
+        type: event.type,
+        deviceId: event.deviceId,
+        level: event.level,
+        symptom: event.symptom,
+        createdAt: getServerTimestamp(),
+      };
+    });
+
+    if (!lockResult.committed) {
+      console.log(`[HealthConcern] duplicate eventId=${event.eventId}`);
+      return res.json({
+        ok: true,
+        duplicate: true,
+        eventId: event.eventId,
+      });
+    }
+
+    const alertRef = db.ref("alerts").push();
+    const healthConcernRef = db.ref("health_concerns").push();
+    const now = getServerTimestamp();
+    const healthConcern = {
+      id: healthConcernRef.key,
+      ...event,
+      createdAt: now,
+      receivedAt: now,
+      resolved: false,
+      source: "robot_conversation",
+    };
+    const alert = {
+      id: alertRef.key,
+      source: event.deviceId,
+      type: event.type,
+      level: event.level,
+      message: event.message,
+      status: "new",
+      category: event.category,
+      symptom: event.symptom,
+      language: event.language,
+      eventId: event.eventId,
+      healthConcernId: healthConcernRef.key,
+      createdAt: now,
+      receivedAt: now,
+    };
+
+    await db.ref().update({
+      [`alerts/${alertRef.key}`]: alert,
+      [`health_concerns/${healthConcernRef.key}`]: healthConcern,
+    });
+
+    let lineNotification = {
+      eligible: false,
+      status: "not_required",
+    };
+
+    if (event.level === "danger" && event.status === "detected") {
+      if (!isHealthConcernLineEnabled()) {
+        lineNotification = {
+          eligible: true,
+          status: "skipped",
+          reason: "health_concern_line_disabled",
+        };
+      } else {
+        try {
+          const notificationResult = await notifyCaregiversForEvent({
+            ...event,
+            id: healthConcernRef.key,
+            source: event.deviceId,
+            healthConcernId: healthConcernRef.key,
+            alertId: alertRef.key,
+            createdAt: Date.now(),
+            receivedAt: Date.now(),
+          }, { db });
+          const rawNotificationStatus = notificationResult.status || "failed";
+          lineNotification = {
+            eligible: true,
+            status:
+              rawNotificationStatus === "sent" ||
+              rawNotificationStatus === "skipped"
+                ? rawNotificationStatus
+                : rawNotificationStatus === "partial"
+                  ? "sent"
+                  : "failed",
+            notificationId: notificationResult.notificationId || null,
+          };
+        } catch (notificationError) {
+          console.error(
+            `[HealthConcern] caregiver notification failed: ${notificationError.message}`,
+          );
+          lineNotification = {
+            eligible: true,
+            status: "failed",
+          };
+        }
+      }
+    }
+
+    console.log(
+      `[HealthConcern] stored id=${healthConcernRef.key} level=${event.level} eventId=${event.eventId}`,
+    );
+    return res.json({
+      ok: true,
+      duplicate: false,
+      alertId: alertRef.key,
+      healthConcernId: healthConcernRef.key,
+      eventId: event.eventId,
+      level: event.level,
+      message: "Chami alert created",
+      lineNotification,
+    });
+  } catch (error) {
+    if (lockResult?.committed) {
+      try {
+        await dedupeRef.remove();
+      } catch (rollbackError) {
+        console.error(`[HealthConcern] dedupe rollback failed: ${rollbackError.message}`);
+      }
+    }
+    console.error(`[HealthConcern] write failed: ${error.message}`);
+    return res.status(500).json({
+      ok: false,
+      error: "health_concern_write_failed",
+    });
+  }
+}
+
+async function resolveHealthConcern(req, res) {
+  const healthConcernId = cleanString(req.params.healthConcernId, 128);
+
+  if (!isSafeRealtimeId(healthConcernId)) {
+    return res.status(400).json({
+      ok: false,
+      error: "invalid_health_concern_id",
+    });
+  }
+
+  try {
+    const now = getServerTimestamp();
+    await getDb().ref(`health_concerns/${healthConcernId}`).update({
+      resolved: true,
+      resolvedAt: now,
+      resolvedBy: "dashboard",
+      updatedAt: now,
+    });
+
+    return res.json({
+      ok: true,
+      healthConcernId,
+    });
+  } catch (error) {
+    console.error(`[HealthConcern] resolve failed: ${error.message}`);
+    return res.status(500).json({
+      ok: false,
+      error: "health_concern_resolve_failed",
+    });
+  }
+}
+
 async function writeMedicineFollowup(req, res) {
   const body = req.body || {};
   const source = cleanString(body.source, 64, "chami_001");
@@ -387,6 +730,9 @@ router.post("/alert", deviceAuth, async (req, res) => {
   if (MEDICINE_EVENT_TYPES.has(req.body?.type)) {
     return writeMedicineFollowup(req, res);
   }
+  if (req.body?.type === HEALTH_CONCERN_TYPE) {
+    return writeHealthConcern(req, res);
+  }
 
   const {
     source,
@@ -523,6 +869,12 @@ router.post("/line-test", deviceAuth, async (req, res) => {
     });
   }
 });
+
+router.post(
+  "/health-concerns/:healthConcernId/resolve",
+  deviceAuth,
+  resolveHealthConcern,
+);
 
 router.get("/commands/next", deviceAuth, async (req, res) => {
   const { deviceId } = req.query || {};

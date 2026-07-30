@@ -12,6 +12,7 @@ const DEFAULT_TSUNAGARI_DEVICE_TOKEN = "DEV_TOKEN";
 const CARE_LOG_DISPLAY_LIMIT = 3;
 const ALERT_DISPLAY_LIMIT = 1;
 const CAREGIVER_NOTIFICATION_DISPLAY_LIMIT = 3;
+const HEALTH_CONVERSATION_DISPLAY_LIMIT = 10;
 const PENDING_COMMAND_DISPLAY_LIMIT = 2;
 const RESOLVED_FALL_HISTORY_LIMIT = 3;
 const ROBOT_OFFLINE_TIMEOUT_MS = 90 * 1000;
@@ -207,6 +208,41 @@ async function createBackendSmartHomeCommand(command) {
   return payload;
 }
 
+async function resolveBackendHealthConcern(healthConcernId) {
+  if (!healthConcernId) {
+    throw new Error("Missing health concern id");
+  }
+
+  const headers = {
+    "Content-Type": "application/json",
+  };
+  const deviceToken = getBridgeDeviceToken();
+  const baseUrl = getBridgeApiBaseUrl();
+  const requestUrl = `${baseUrl}/api/chami/health-concerns/${encodeURIComponent(
+    healthConcernId,
+  )}/resolve`;
+
+  if (deviceToken) {
+    headers["x-device-token"] = deviceToken;
+  }
+
+  const response = await fetch(requestUrl, {
+    method: "POST",
+    headers,
+  });
+  const payload = await response
+    .json()
+    .catch(() => ({ ok: false, error: "invalid_json_response" }));
+
+  if (!response.ok || payload?.ok !== true) {
+    throw new Error(
+      payload?.message || payload?.error || `HTTP ${response.status}`,
+    );
+  }
+
+  return payload;
+}
+
 async function sendIRCommand(key) {
   const command = {
     targetDeviceId: SMART_HOME_DEVICE_ID,
@@ -345,6 +381,10 @@ function updateCareLogsSection(logs) {
 
 function updateCaregiverNotificationsSection(records) {
   renderCaregiverNotifications(records);
+}
+
+function updateHealthConcernsSection(records) {
+  renderHealthConcerns(records);
 }
 
 // Render helpers
@@ -577,6 +617,120 @@ function renderCaregiverNotifications(records) {
   });
 
   appendCompactMore(el, hiddenCount, "thông báo cũ hơn");
+}
+
+function getHealthSymptomLabel(symptom) {
+  const labels = {
+    fatigue: "強い疲労",
+    headache: "頭痛",
+    dizziness: "めまい",
+    breathing: "呼吸困難",
+    chest_pain: "胸の痛み",
+    abdominal_pain: "腹痛",
+    nausea: "吐き気",
+    sleep_problem: "睡眠障害",
+    heart: "動悸・心拍異常",
+    weakness_or_numbness: "しびれ・脱力",
+    fever: "発熱",
+    fainting: "失神・意識低下",
+    pain_general: "強い痛み",
+    direct_help: "助けを求める発言",
+  };
+  return labels[symptom] || "健康症状";
+}
+
+function getHealthLevelPresentation(level) {
+  if (level === "danger") {
+    return { label: "緊急", className: "is-danger" };
+  }
+  if (level === "warning") {
+    return { label: "注意", className: "is-warning" };
+  }
+  return { label: "情報", className: "is-info" };
+}
+
+function renderHealthConcerns(records) {
+  const el = document.getElementById("health-conversation-list");
+  if (!el) return;
+  el.replaceChildren();
+
+  const sorted = sortByNewest(records || [], (record) =>
+    getTimeValue(record.createdAt || record.receivedAt),
+  );
+  const visible = sorted.slice(0, HEALTH_CONVERSATION_DISPLAY_LIMIT);
+  const hiddenCount = Math.max(sorted.length - visible.length, 0);
+
+  if (visible.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    empty.textContent = "健康に関する会話履歴はありません。";
+    el.appendChild(empty);
+    return;
+  }
+
+  visible.forEach((record) => {
+    const presentation = getHealthLevelPresentation(record.level);
+    const item = document.createElement("article");
+    item.className = `health-concern-item ${presentation.className}`;
+
+    const main = document.createElement("div");
+    main.className = "health-concern-main";
+
+    const heading = document.createElement("div");
+    heading.className = "health-concern-heading";
+    const title = document.createElement("strong");
+    title.textContent = getHealthSymptomLabel(record.symptom);
+    const badge = document.createElement("span");
+    badge.className = `health-level-badge ${presentation.className}`;
+    badge.textContent = presentation.label;
+    heading.append(title, badge);
+
+    const message = document.createElement("p");
+    message.className = "health-concern-message";
+    message.textContent = record.message || "健康状態に関する会話を検知しました。";
+
+    const meta = document.createElement("div");
+    meta.className = "health-concern-meta";
+    [
+      formatDateTime(record.createdAt || record.receivedAt),
+      record.language || "unknown",
+      record.deviceId || record.source || "chami_001",
+      record.resolved ? "対応済み" : "未対応",
+    ].forEach((value) => {
+      const span = document.createElement("span");
+      span.textContent = value;
+      meta.appendChild(span);
+    });
+
+    main.append(heading, message, meta);
+    item.appendChild(main);
+
+    if (!record.resolved) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "health-resolve-button";
+      button.textContent = "対応済み";
+      button.addEventListener("click", async () => {
+        try {
+          button.disabled = true;
+          try {
+            await resolveBackendHealthConcern(record.id);
+          } catch (backendError) {
+            console.warn("Dashboard: backend health resolve failed", backendError);
+            await FirebaseService.resolveHealthConcern(record.id);
+          }
+        } catch (error) {
+          console.error("Dashboard: health concern resolve failed", error);
+          button.disabled = false;
+        }
+      });
+      item.appendChild(button);
+    }
+
+    el.appendChild(item);
+  });
+
+  appendCompactMore(el, hiddenCount, "古い履歴");
 }
 
 function getTimeValue(value) {
@@ -2427,6 +2581,12 @@ if (typeof FirebaseService.listenCaregiverNotifications === "function") {
   FirebaseService.listenCaregiverNotifications((data) => {
     updateCaregiverNotificationsSection(data || []);
   }, 10);
+}
+
+if (typeof FirebaseService.listenHealthConcerns === "function") {
+  FirebaseService.listenHealthConcerns((data) => {
+    updateHealthConcernsSection(data || []);
+  }, 20);
 }
 
 if (typeof FirebaseService.subscribeToCareEvents === "function") {

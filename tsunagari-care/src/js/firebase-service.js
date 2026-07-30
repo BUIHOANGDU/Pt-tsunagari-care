@@ -17,6 +17,7 @@ const FirebaseService = (function () {
     caregiver_notifications: [],
     commands: [],
     medicine_reminders: [],
+    health_concerns: [],
   };
 
   const unsubscribes = {
@@ -28,6 +29,7 @@ const FirebaseService = (function () {
     caregiver_notifications: null,
     commands: null,
     medicine_reminders: null,
+    health_concerns: null,
   };
   const DEFAULT_MEDICINE_REMINDER = {
     type: "medicine",
@@ -177,6 +179,7 @@ const FirebaseService = (function () {
       caregiver_notifications: "mock:caregiver_notifications",
       commands: "mock:commands",
       medicine_reminders: "mock:reminders",
+      health_concerns: "mock:health_concerns",
     };
 
     const key = map[kind];
@@ -226,6 +229,7 @@ const FirebaseService = (function () {
           collection === "alerts" ||
           collection === "care_logs" ||
           collection === "care_events" ||
+          collection === "health_concerns" ||
           collection === "commands"
         ) {
           data = sortByCreatedAtDesc(data);
@@ -381,6 +385,74 @@ const FirebaseService = (function () {
       const index = listeners.caregiver_notifications.indexOf(emit);
       if (index > -1) listeners.caregiver_notifications.splice(index, 1);
     };
+  }
+
+  function normalizeHealthConcerns(value, limit) {
+    return sortByCreatedAtDesc(
+      objectToArray(value)
+        .filter((item) => item && item.type === "health_concern")
+        .map((item) => ({
+          ...item,
+          timestamp: normalizeTimestamp(item.createdAt || item.receivedAt),
+          resolved: item.resolved === true,
+        })),
+    ).slice(0, limit);
+  }
+
+  function listenHealthConcerns(callback, limit = 20) {
+    const safeLimit = Math.min(Math.max(Number(limit) || 20, 1), 50);
+
+    if (useRealtime) {
+      const query = db
+        .ref("health_concerns")
+        .orderByChild("createdAt")
+        .limitToLast(safeLimit);
+      const handler = (snapshot) => {
+        callback(normalizeHealthConcerns(snapshot.val(), safeLimit));
+      };
+      query.on("value", handler, (error) => {
+        console.warn("Health concern listener error", error);
+        callback([]);
+      });
+      return () => query.off("value", handler);
+    }
+
+    const emit = (records) => {
+      callback(normalizeHealthConcerns(records, safeLimit));
+    };
+    listeners.health_concerns.push(emit);
+    emit(JSON.parse(localStorage.getItem("mock:health_concerns") || "[]"));
+    return () => {
+      const index = listeners.health_concerns.indexOf(emit);
+      if (index > -1) listeners.health_concerns.splice(index, 1);
+    };
+  }
+
+  async function resolveHealthConcern(id) {
+    const safeId = sanitizeRealtimeKey(id);
+    if (!safeId) throw new Error("Invalid health concern id");
+    const payload = {
+      resolved: true,
+      resolvedAt: realtimeServerTs(),
+      resolvedBy: "dashboard",
+    };
+
+    if (useRealtime) {
+      await updateRealtimeValue(`health_concerns/${safeId}`, payload);
+      return;
+    }
+
+    const records = JSON.parse(localStorage.getItem("mock:health_concerns") || "[]");
+    const index = records.findIndex((item) => item.id === safeId);
+    if (index > -1) {
+      records[index] = {
+        ...records[index],
+        ...payload,
+        resolvedAt: serverTs(),
+      };
+      localStorage.setItem("mock:health_concerns", JSON.stringify(records));
+      notifyLocal("health_concerns");
+    }
   }
 
   function subscribeToCareEvents(cb) {
@@ -1253,6 +1325,10 @@ const FirebaseService = (function () {
       writeLocal("mock:caregiver_notifications", []);
     }
 
+    if (!localStorage.getItem("mock:health_concerns")) {
+      writeLocal("mock:health_concerns", []);
+    }
+
     if (!localStorage.getItem("mock:robots:chami01")) {
       writeLocal("mock:robots:chami01", {
         id: "chami01",
@@ -1281,6 +1357,7 @@ const FirebaseService = (function () {
     subscribeToCareLogs,
     listenMedicineCareLogs,
     listenCaregiverNotifications,
+    listenHealthConcerns,
     subscribeToCareEvents,
     subscribeToCommands,
     listenMedicineReminder,
@@ -1305,6 +1382,7 @@ const FirebaseService = (function () {
     createSmartHomeCommand,
     createCareLog,
     createCareEvent,
+    resolveHealthConcern,
     createAlert,
     listAlerts,
     listCareLogs,

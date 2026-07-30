@@ -1323,3 +1323,176 @@ lam viec. Can chay lai day du cuoi phase sau khi history duoc ghi:
 - Next phase nen them unit test cho policy/message formatter va Firebase mock
   dedupe, sau do can nhac job retry ben vung neu van can dam bao delivery sau
   restart.
+
+# 2026-07-27 01:41:19 +09:00 - Health Conversation Monitoring backend/dashboard
+
+## Muc tieu
+
+Hoan thien backend + dashboard cho event firmware `health_concern` tu Health
+Conversation Monitoring. Scope chinh nam trong project that
+`tsunagari-care`, gom `/api/chami/alert`, service LINE/caregiver hien co,
+Firebase RTDB va dashboard static.
+
+## Kien truc da kiem tra
+
+- Route nhan firmware: `tsunagari-care/server/routes/chami.js`,
+  `POST /api/chami/alert`.
+- Firebase Admin: `tsunagari-care/server/firebaseAdmin.js`, dung
+  `FIREBASE_SERVICE_ACCOUNT_JSON`, `FIREBASE_DATABASE_URL` va
+  `admin.database.ServerValue.TIMESTAMP`.
+- Server root: `tsunagari-care/server/index.js`.
+- Dashboard: `tsunagari-care/index.html`,
+  `src/js/firebase-service.js`, `src/js/dashboard.js`, `src/css/style.css`.
+- `tsunagari-care/server` truoc do chua co `lib/caregiverNotificationService.js`
+  va `lib/lineMessagingService.js`; da dua service hien co tu backend root vao
+  app that de tai su dung, khong tao he thong LINE thu hai.
+
+## Backend health_concern
+
+- Neu `type === "health_concern"`, route di vao handler rieng truoc legacy
+  alert flow.
+- Validate bat buoc: `type`, `status`, `level`, `category`, `symptom`,
+  `message`, `language`, `eventId`.
+- Whitelist:
+  - `status`: `detected`
+  - `level`: `info`, `warning`, `danger`
+  - `category`: `health`
+  - `language`: `ja`, `vi`, `unknown`
+  - `symptom`: `fatigue`, `headache`, `dizziness`, `breathing`,
+    `chest_pain`, `abdominal_pain`, `nausea`, `sleep_problem`, `heart`,
+    `weakness_or_numbness`, `fever`, `fainting`, `pain_general`,
+    `direct_help`
+- `eventId` phai khop safe ID toi da 128 ky tu.
+- `message` trim toi da 300 ky tu.
+- `confidence` optional number 0..1.
+- Payload health khong chap nhan field object/array long sau.
+- Khong tin timestamp tu firmware va khong cho client override server
+  timestamp.
+- Invalid payload tra HTTP 400:
+  `{ ok:false, error:"invalid_health_concern", details:"..." }`.
+
+## RTDB schema
+
+Backend ghi path rieng:
+
+- `health_concerns/{healthConcernId}`
+- `health_concern_dedup/{sha256(eventId)}`
+
+Record `health_concerns` gom `id`, `eventId`, `deviceId`, `type`, `status`,
+`level`, `category`, `symptom`, `message`, `language`, `confidence`,
+`createdAt`, `receivedAt`, `resolved=false`, `source="robot_conversation"`.
+
+Backend van ghi them `alerts/{alertId}` de Alert Center cu va firmware response
+cu khong bi vo. Khong luu raw audio, khong luu conversation history, khong luu
+token.
+
+`HEALTH_CONCERN_STORE_TRANSCRIPT=false` mac dinh. Neu false, transcript bi bo
+hoan toan khoi record, khong luu null.
+
+## Idempotency
+
+- Dedupe backend dung Firebase RTDB transaction tai
+  `health_concern_dedup/{sha256(eventId)}`.
+- Cung `eventId` chi xu ly mot lan.
+- Duplicate tra HTTP 200:
+  `{ ok:true, duplicate:true, eventId:"..." }`.
+- Duplicate khong tao them `health_concerns`, khong tao alert moi, khong gui
+  LINE lai.
+
+## LINE policy
+
+- Mo rong `caregiverNotificationService.shouldNotifyCaregiver()` de chi eligible
+  khi `type=health_concern`, `level=danger`, `status=detected`.
+- `info` va `warning` tra `lineNotification.eligible=false`,
+  `status=not_required`.
+- `danger` goi `notifyCaregiversForEvent()` va tai su dung dedupe/retry LINE
+  hien co. Route khong goi LINE API truc tiep.
+- LINE message health format tieng Nhat-first, co symptom label tieng Nhat,
+  level, device, time, message trung tinh va disclaimer khong chan doan benh.
+- Notification record them cac field backward-compatible:
+  `sourceEventType`, `sourceEventId`, `healthConcernId`, `level`, `symptom`,
+  `completedAt`.
+
+## API response
+
+Success:
+
+- `ok`
+- `duplicate`
+- `alertId`
+- `healthConcernId`
+- `eventId`
+- `level`
+- `message`
+- `lineNotification`
+
+Giữ `ok`, `alertId`, `message` cho firmware/parser cu.
+
+## Dashboard
+
+- Them panel rieng `健康状態の履歴`.
+- Dashboard doc `health_concerns` toi da 20 record gan nhat, render toi da 10
+  record moi nhat.
+- Hien thi time, symptom label tieng Nhat, level badge, message, language,
+  deviceId va resolved status.
+- Muc danger co mau canh bao ro hon, warning vua phai, info nhe.
+- Khong hien transcript mac dinh.
+- Empty state: `健康に関する会話履歴はありません。`
+- Them nut `対応済み`, goi backend
+  `POST /api/chami/health-concerns/:healthConcernId/resolve` de update
+  `resolved=true`, `resolvedAt`, `resolvedBy=dashboard`.
+- Neu backend resolve khong kha dung trong demo local, dashboard fallback sang
+  FirebaseService resolve hien co.
+- Resolve khong xoa record va khong gui lai LINE.
+
+## Firebase Rules de xuat
+
+```json
+"health_concerns": {
+  ".read": true,
+  ".write": false
+},
+"health_concern_dedup": {
+  ".read": false,
+  ".write": false
+}
+```
+
+Dashboard doc `health_concerns`; dedupe va resolve production di qua backend
+bang Admin SDK, nen rules co the khoa write tu client.
+
+## Files sua
+
+- `tsunagari-care/server/routes/chami.js`
+- `tsunagari-care/server/lib/caregiverNotificationService.js`
+- `tsunagari-care/server/lib/lineMessagingService.js`
+- `tsunagari-care/src/js/firebase-service.js`
+- `tsunagari-care/src/js/dashboard.js`
+- `tsunagari-care/src/css/style.css`
+- `tsunagari-care/index.html`
+- `tsunagari-care/PROJECT_HISTORY.md`
+
+## Checks
+
+- `node --check tsunagari-care/server/routes/chami.js`
+- `node --check tsunagari-care/server/lib/caregiverNotificationService.js`
+- `node --check tsunagari-care/server/lib/lineMessagingService.js`
+- `node --check tsunagari-care/server/index.js`
+- `node --check tsunagari-care/src/js/firebase-service.js`
+- `node --check tsunagari-care/src/js/dashboard.js`
+- `git diff --check`
+
+## Manual tests can lam
+
+- POST `health_concern` level `info`/`warning`: luu history, khong LINE.
+- POST `health_concern` level `danger`: luu history, tao alert va LINE
+  notification eligible.
+- POST duplicate cung `eventId`: response duplicate, khong tao history/LINE moi.
+- Payload invalid: HTTP 400, khong LINE.
+- Dashboard load 10 record, resolve mot record va xac nhan record van con trong
+  history.
+
+## Gioi han
+
+- Chua goi LINE that trong session nay vi khong co token/user ID.
+- Chua deploy Render va chua test voi Firebase RTDB production rules.

@@ -15,6 +15,12 @@ const NOTIFIABLE_EVENT_TYPES = new Set([
 const SAFE_KEY_RE = /[.#$\[\]\/]/g;
 const MAX_PREVIEW_LENGTH = 160;
 
+function readBooleanEnv(name, fallback = false) {
+  const value = process.env[name];
+  if (value === undefined || value === null || value === "") return fallback;
+  return String(value).trim().toLowerCase() === "true";
+}
+
 function shouldNotifyCaregiver(event) {
   if (
     event?.source === "demo" &&
@@ -24,6 +30,13 @@ function shouldNotifyCaregiver(event) {
     )
   ) {
     return false;
+  }
+  if (event?.type === "health_concern") {
+    return (
+      readBooleanEnv("HEALTH_CONCERN_LINE_ENABLED", true) &&
+      event?.level === "danger" &&
+      event?.status === "detected"
+    );
   }
   return NOTIFIABLE_EVENT_TYPES.has(event?.type);
 }
@@ -103,6 +116,32 @@ function buildReminderPublicId(reminderId) {
   return `${text.slice(0, 4)}...${text.slice(-4)}`;
 }
 
+function getHealthSymptomLabel(symptom) {
+  const labels = {
+    fatigue: "強い疲労",
+    headache: "頭痛",
+    dizziness: "めまい",
+    breathing: "呼吸困難",
+    chest_pain: "胸の痛み",
+    abdominal_pain: "腹痛",
+    nausea: "吐き気",
+    sleep_problem: "睡眠障害",
+    heart: "動悸・心拍異常",
+    weakness_or_numbness: "しびれ・脱力",
+    fever: "発熱",
+    fainting: "失神・意識低下",
+    pain_general: "強い痛み",
+    direct_help: "助けを求める発言",
+  };
+  return labels[symptom] || "健康症状";
+}
+
+function getHealthLevelLabel(level) {
+  if (level === "danger") return "危険";
+  if (level === "warning") return "注意";
+  return "情報";
+}
+
 function buildMessage(event) {
   const time = formatJapanTime(event?.createdAt || event?.receivedAt);
   const source = cleanString(
@@ -110,6 +149,33 @@ function buildMessage(event) {
     80,
     event?.type === "fall_confirmed" ? "camera" : "Chami",
   );
+
+  if (event.type === "health_concern") {
+    const symptomLabel = getHealthSymptomLabel(event.symptom);
+    const message = cleanString(
+      event.message,
+      300,
+      "利用者が会話中に危険な健康症状を訴えています。",
+    );
+    return [
+      "【つながりケア 緊急健康アラート】",
+      "",
+      "Chamiが会話中に危険な健康症状を検知しました。",
+      "",
+      `症状: ${symptomLabel}`,
+      `危険度: ${getHealthLevelLabel(event.level)}`,
+      `端末: ${source}`,
+      `時刻: ${time}`,
+      `内容: ${message}`,
+      event.language === "vi"
+        ? "Người dùng báo triệu chứng sức khỏe nguy hiểm."
+        : "",
+      "",
+      "症状が続く、悪化している、意識障害、呼吸困難がある場合は、速やかに医療機関や緊急窓口へ連絡してください。",
+    ]
+      .filter((line) => line !== "")
+      .join("\n");
+  }
 
   if (event.type === "fall_confirmed") {
     return [
@@ -209,6 +275,16 @@ async function notifyCaregiversForEvent(event, options = {}) {
     `line_notification_dedup/${sanitizeRealtimeKey(eventId)}`,
   );
   const now = getServerTimestamp();
+  const sourceMetadata =
+    eventType === "health_concern"
+      ? {
+          sourceEventType: "health_concern",
+          sourceEventId: eventId,
+          healthConcernId: cleanString(event?.healthConcernId, 128),
+          level: cleanString(event?.level, 32),
+          symptom: cleanString(event?.symptom, 64),
+        }
+      : {};
   const lockResult = await dedupeRef.transaction((current) => {
     if (
       current &&
@@ -232,6 +308,7 @@ async function notifyCaregiversForEvent(event, options = {}) {
     await writeNotification(notificationRef, {
       eventId,
       eventType,
+      ...sourceMetadata,
       source: cleanString(event?.source, 80, "unknown"),
       status: "skipped",
       recipientCount: 0,
@@ -239,6 +316,7 @@ async function notifyCaregiversForEvent(event, options = {}) {
       failureCount: 0,
       messagePreview: "Bỏ qua thông báo trùng",
       createdAt: now,
+      completedAt: now,
       sentAt: null,
       updatedAt: now,
       lastError: "duplicate event",
@@ -251,6 +329,7 @@ async function notifyCaregiversForEvent(event, options = {}) {
   await writeNotification(notificationRef, {
     eventId,
     eventType,
+    ...sourceMetadata,
     source: cleanString(event?.source, 80, "unknown"),
     status: "pending",
     recipientCount: getConfiguredRecipientCount(),
@@ -288,6 +367,7 @@ async function notifyCaregiversForEvent(event, options = {}) {
     recipientCount: summary.recipientCount,
     successCount: summary.successCount,
     failureCount: summary.failureCount,
+    completedAt: getServerTimestamp(),
     sentAt: getServerTimestamp(),
     updatedAt: getServerTimestamp(),
     lastError: summary.lastError,
