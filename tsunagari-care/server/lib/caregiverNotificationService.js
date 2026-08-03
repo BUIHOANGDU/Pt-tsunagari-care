@@ -5,7 +5,6 @@ const {
   getConfiguredRecipientCount,
   sendLineMessageToCaregivers,
 } = require("./lineMessagingService");
-const { schedulePruneCollection } = require("./rtdbRetentionService");
 
 const NOTIFIABLE_EVENT_TYPES = new Set([
   "fall_confirmed",
@@ -15,12 +14,6 @@ const NOTIFIABLE_EVENT_TYPES = new Set([
 ]);
 const SAFE_KEY_RE = /[.#$\[\]\/]/g;
 const MAX_PREVIEW_LENGTH = 160;
-
-function readBooleanEnv(name, fallback = false) {
-  const value = process.env[name];
-  if (value === undefined || value === null || value === "") return fallback;
-  return String(value).trim().toLowerCase() === "true";
-}
 
 function shouldNotifyCaregiver(event) {
   if (
@@ -33,11 +26,7 @@ function shouldNotifyCaregiver(event) {
     return false;
   }
   if (event?.type === "health_concern") {
-    return (
-      readBooleanEnv("HEALTH_CONCERN_LINE_ENABLED", true) &&
-      event?.level === "danger" &&
-      event?.status === "detected"
-    );
+    return event?.level === "danger" && event?.status === "detected";
   }
   return NOTIFIABLE_EVENT_TYPES.has(event?.type);
 }
@@ -260,13 +249,6 @@ async function writeNotification(ref, payload) {
   });
 }
 
-function scheduleCaregiverNotificationPrune(db) {
-  schedulePruneCollection({
-    db,
-    path: "caregiver_notifications",
-  });
-}
-
 async function notifyCaregiversForEvent(event, options = {}) {
   const eventType = event?.type || "unknown";
   const eventId = getStableEventId(event);
@@ -283,7 +265,6 @@ async function notifyCaregiversForEvent(event, options = {}) {
     `line_notification_dedup/${sanitizeRealtimeKey(eventId)}`,
   );
   const now = getServerTimestamp();
-  const createdAtMs = Date.now();
   const sourceMetadata =
     eventType === "health_concern"
       ? {
@@ -325,13 +306,11 @@ async function notifyCaregiversForEvent(event, options = {}) {
       failureCount: 0,
       messagePreview: "Bỏ qua thông báo trùng",
       createdAt: now,
-      createdAtMs,
       completedAt: now,
       sentAt: null,
       updatedAt: now,
       lastError: "duplicate event",
     });
-    scheduleCaregiverNotificationPrune(db);
     return { ok: true, status: "skipped", reason: "duplicate" };
   }
 
@@ -348,12 +327,10 @@ async function notifyCaregiversForEvent(event, options = {}) {
     failureCount: 0,
     messagePreview,
     createdAt: now,
-    createdAtMs,
     sentAt: null,
     updatedAt: now,
     lastError: null,
   });
-  scheduleCaregiverNotificationPrune(db);
   console.log(`[CaregiverNotify] notification created id=${notificationRef.key}`);
 
   let summary;

@@ -9,28 +9,395 @@ const AIRCON_DEVICE_ID = "ac01";
 const DEFAULT_TSUNAGARI_BRIDGE_API_URL =
   "https://pt-tsunagari-care.onrender.com";
 const DEFAULT_TSUNAGARI_DEVICE_TOKEN = "DEV_TOKEN";
+const TOKYO_TIMEZONE = "Asia/Tokyo";
+const WEATHER_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
 const CARE_LOG_DISPLAY_LIMIT = 3;
 const ALERT_DISPLAY_LIMIT = 1;
 const CAREGIVER_NOTIFICATION_DISPLAY_LIMIT = 3;
-const HEALTH_CONVERSATION_DISPLAY_LIMIT = 10;
-const PENDING_COMMAND_DISPLAY_LIMIT = 2;
+const HEALTH_CONVERSATION_COLLAPSED_LIMIT = 5;
+const HEALTH_CONVERSATION_MAX_RECORDS = 30;
+const COMMAND_TOAST_MAX_VISIBLE = 3;
+const COMMAND_TOAST_DEFAULT_DURATION_MS = 6000;
+const COMMAND_TOAST_DURATIONS_MS = {
+  pending: 6000,
+  processing: 6000,
+  completed: 4000,
+  failed: 8000,
+  cancelled: 6000,
+  warning: 6000,
+};
 const RESOLVED_FALL_HISTORY_LIMIT = 3;
 const ROBOT_OFFLINE_TIMEOUT_MS = 90 * 1000;
 const ROBOT_STATUS_REFRESH_INTERVAL_MS = 10 * 1000;
 const FALL_RESPONSE_EVENT_WINDOW_MS = 10 * 60 * 1000;
 const FALL_RESPONSE_CLOCK_SKEW_MS = 30 * 1000;
 const FALL_RESPONSE_TIMELINE_REFRESH_INTERVAL_MS = 30 * 1000;
+let healthConversationExpanded = false;
+let latestHealthConcerns = [];
 const LEGACY_DEMO_MEDICINE_MESSAGE =
   "\u0110\u00e3 u\u1ed1ng thu\u1ed1c (demo)";
 const DEFAULT_MEDICINE_REMINDER = {
   medicineName: "",
   time: "08:00",
-  timezone: "Asia/Tokyo",
+  timezone: TOKYO_TIMEZONE,
   repeat: "daily",
   enabled: true,
   targetDeviceId: "chami_001",
 };
-const MEDICINE_REMINDER_SENT_MESSAGE = "Đã gửi lời nhắc uống thuốc";
+const ROOM_ENVIRONMENT_DEMO = {
+  temperatureC: 25,
+  humidityPercent: 50,
+  source: "demo",
+  updatedAt: new Date().toISOString(),
+  online: true,
+};
+
+function uiText(key) {
+  return window.TsunagariI18n?.t
+    ? window.TsunagariI18n.t(key)
+    : key;
+}
+
+function getUiLanguage() {
+  return window.TsunagariI18n?.getCurrentLanguage
+    ? window.TsunagariI18n.getCurrentLanguage()
+    : "ja";
+}
+
+function getDateTimeLocale() {
+  return getUiLanguage() === "vi" ? "vi-VN" : "ja-JP";
+}
+
+function getTokyoDateParts(date = new Date()) {
+  const formatter = new Intl.DateTimeFormat(getDateTimeLocale(), {
+    timeZone: TOKYO_TIMEZONE,
+    weekday: "long",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const parts = formatter.formatToParts(date);
+  const byType = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+
+  return {
+    weekday: byType.weekday || "",
+    year: byType.year || "",
+    month: byType.month || "",
+    day: byType.day || "",
+  };
+}
+
+function formatTokyoDate(date = new Date()) {
+  const parts = getTokyoDateParts(date);
+  if (getUiLanguage() === "vi") {
+    return `${parts.weekday}, ${parts.day}/${parts.month}/${parts.year}`;
+  }
+
+  return `${parts.year}年${Number(parts.month)}月${Number(parts.day)}日 ${parts.weekday}`;
+}
+
+function formatTokyoTime(date = new Date()) {
+  return new Intl.DateTimeFormat(getDateTimeLocale(), {
+    timeZone: TOKYO_TIMEZONE,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).format(date);
+}
+
+function roundTemperature(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.round(parsed) : null;
+}
+
+function formatTemperature(value, digits = 0) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return "--°C";
+  return `${parsed.toFixed(digits).replace(/\.0$/, "")}°C`;
+}
+
+function getLocalizedLocationName(location = {}) {
+  const name = String(location.name || "").trim();
+  return name.toLowerCase() === "tokyo" ? uiText("tokyo") : name || uiText("tokyo");
+}
+
+function getWeatherKind(weatherCode) {
+  const code = Number(weatherCode);
+  if (code === 0) return "clear";
+  if (code === 1 || code === 2) return "partlyCloudy";
+  if (code === 3) return "cloudy";
+  if (code === 45 || code === 48) return "fog";
+  if ([51, 53, 55, 56, 57].includes(code)) return "drizzle";
+  if ([61, 63, 66, 67, 80, 81].includes(code)) return "rain";
+  if (code === 65 || code === 82) return "heavyRain";
+  if ([71, 73, 75, 77, 85, 86].includes(code)) return "snow";
+  if ([95, 96, 99].includes(code)) return "thunderstorm";
+  return "unknownWeather";
+}
+
+function getWeatherIcon(kind) {
+  const icons = {
+    clear: "☀️",
+    partlyCloudy: "🌤️",
+    cloudy: "☁️",
+    fog: "🌫️",
+    drizzle: "🌧️",
+    rain: "🌧️",
+    heavyRain: "🌧️",
+    snow: "❄️",
+    thunderstorm: "⛈️",
+    unknownWeather: "☁️",
+  };
+
+  return icons[kind] || icons.unknownWeather;
+}
+
+function getRoomEnvironment() {
+  return ROOM_ENVIRONMENT_DEMO;
+}
+
+function updateDateTimeEnvironmentClock() {
+  const now = new Date();
+  const dateEl = document.getElementById("current-date-text");
+  const timeEl = document.getElementById("current-time-text");
+
+  if (dateEl) dateEl.textContent = formatTokyoDate(now);
+  if (timeEl) timeEl.textContent = formatTokyoTime(now);
+}
+
+function renderRoomEnvironment() {
+  const room = getRoomEnvironment();
+  const temperatureEl = document.getElementById("room-temperature-text");
+  const humidityEl = document.getElementById("room-humidity-text");
+  const badgeEl = document.getElementById("room-demo-badge");
+
+  if (temperatureEl) {
+    temperatureEl.textContent = formatTemperature(room.temperatureC);
+  }
+  if (humidityEl) {
+    humidityEl.textContent = `${uiText("humidity")} ${Math.round(room.humidityPercent)}%`;
+  }
+  if (badgeEl) {
+    badgeEl.textContent = room.source === "demo" ? uiText("demo") : room.source;
+  }
+}
+
+function renderOutdoorWeather() {
+  const tile = document.getElementById("outdoor-weather-tile");
+  const iconEl = document.getElementById("outdoor-weather-icon");
+  const temperatureEl = document.getElementById("outdoor-temperature-text");
+  const detailEl = document.getElementById("outdoor-weather-detail");
+  if (!tile || !iconEl || !temperatureEl || !detailEl) return;
+
+  tile.classList.remove("is-loading", "is-stale", "is-unavailable");
+
+  if (latestWeatherState.status === "loading") {
+    tile.classList.add("is-loading");
+    iconEl.textContent = "☁️";
+    iconEl.setAttribute("aria-label", uiText("weatherLoading"));
+    temperatureEl.textContent = "--°C";
+    detailEl.textContent = uiText("weatherLoading");
+    return;
+  }
+
+  if (latestWeatherState.status === "unavailable" || !latestWeatherState.data) {
+    tile.classList.add("is-unavailable");
+    iconEl.textContent = "☁️";
+    iconEl.setAttribute("aria-label", uiText("weatherUnavailable"));
+    temperatureEl.textContent = "--°C";
+    detailEl.textContent = uiText("weatherUnavailable");
+    return;
+  }
+
+  const data = latestWeatherState.data;
+  const weather = data.weather || {};
+  const kind = getWeatherKind(weather.weatherCode);
+  const description = uiText(kind);
+  const location = getLocalizedLocationName(data.location);
+  const staleLabel = latestWeatherState.status === "stale" ? `${uiText("weatherStale")} · ` : "";
+  const observedAt = weather.observedAt ? formatMedicineTime(weather.observedAt) : "";
+  const updated = observedAt ? ` · ${uiText("lastUpdated")} ${observedAt}` : "";
+
+  if (latestWeatherState.status === "stale") {
+    tile.classList.add("is-stale");
+  }
+  iconEl.textContent = getWeatherIcon(kind);
+  iconEl.setAttribute("aria-label", description);
+  temperatureEl.textContent = `${location} ${formatTemperature(roundTemperature(weather.temperatureC))}`;
+  detailEl.textContent =
+    `${staleLabel}${description} · ${uiText("feelsLike")} ${formatTemperature(
+      weather.apparentTemperatureC,
+      1,
+    )} · ${uiText("humidity")} ${Math.round(weather.humidityPercent)}%${updated}`;
+}
+
+async function fetchOutdoorWeather() {
+  if (document.visibilityState === "hidden") return;
+  lastWeatherFetchAt = Date.now();
+
+  if (!latestWeatherState.data) {
+    latestWeatherState = { status: "loading", data: null };
+    renderOutdoorWeather();
+  }
+
+  try {
+    const response = await fetch(`${getBridgeApiBaseUrl()}/api/weather/current`, {
+      headers: {
+        accept: "application/json",
+      },
+    });
+    const payload = await response.json().catch(() => null);
+
+    if (!response.ok || !payload?.ok || !payload.weather) {
+      throw new Error(payload?.error || `HTTP ${response.status}`);
+    }
+
+    latestWeatherState = {
+      status: payload.stale ? "stale" : "success",
+      data: payload,
+    };
+  } catch (error) {
+    console.warn("Dashboard: weather fetch failed", error);
+    latestWeatherState = latestWeatherState.data
+      ? { status: "stale", data: latestWeatherState.data }
+      : { status: "unavailable", data: null };
+  }
+
+  renderOutdoorWeather();
+}
+
+function startEnvironmentWidget() {
+  if (environmentWidgetStarted) return;
+  environmentWidgetStarted = true;
+
+  updateDateTimeEnvironmentClock();
+  renderRoomEnvironment();
+  renderOutdoorWeather();
+  fetchOutdoorWeather();
+
+  environmentClockIntervalId = window.setInterval(
+    updateDateTimeEnvironmentClock,
+    1000,
+  );
+  weatherRefreshIntervalId = window.setInterval(() => {
+    if (document.visibilityState !== "hidden") {
+      fetchOutdoorWeather();
+    }
+  }, WEATHER_REFRESH_INTERVAL_MS);
+
+  document.addEventListener("visibilitychange", () => {
+    if (
+      document.visibilityState === "visible" &&
+      Date.now() - lastWeatherFetchAt > WEATHER_REFRESH_INTERVAL_MS
+    ) {
+      fetchOutdoorWeather();
+    }
+  });
+
+  window.addEventListener("pagehide", () => {
+    if (environmentClockIntervalId) {
+      window.clearInterval(environmentClockIntervalId);
+      environmentClockIntervalId = null;
+    }
+    if (weatherRefreshIntervalId) {
+      window.clearInterval(weatherRefreshIntervalId);
+      weatherRefreshIntervalId = null;
+    }
+  });
+}
+
+const statusTranslationKeys = {
+  active: "active",
+  cancelled: "cancelled",
+  completed: "completed",
+  confirmed: "confirmed",
+  danger: "emergency",
+  done: "done",
+  failed: "failed",
+  idle: "idle",
+  listening: "listening",
+  no_response: "noResponse",
+  "no-response": "noResponse",
+  offline: "offline",
+  online: "online",
+  partial: "partial",
+  pending: "pending",
+  processing: "processing",
+  resolved: "resolved",
+  safe: "safe",
+  sent: "sent",
+  skipped: "skipped",
+  speaking: "speaking",
+  suspected: "suspected",
+  warning: "warning",
+};
+
+const demoMedicineNameKeys = {
+  "Thuốc bổ tim": "heartMedicine",
+  "Thuốc huyết áp": "bloodPressureMedicine",
+};
+
+const demoDeviceNameKeys = {
+  ac01: "airConditioner",
+  aircon: "airConditioner",
+  fan: "bedroomFan",
+  fan01: "bedroomFan",
+  ir_hub_001: "irHub",
+  light01: "livingRoomLight",
+  light_001: "livingRoomLight",
+};
+
+const legacySystemMessageKeys = {
+  "Camera phát hiện nguy cơ té ngã": "cameraFallDetected",
+  "Chami đã hoàn tất kiểm tra": "chamiCheckCompleted",
+  "Không có phản hồi sau thời gian chờ": "noResponseAfterWait",
+  "Người dùng cần trợ giúp": "userNeedsHelp",
+  "Đã gửi cảnh báo khẩn cấp cho người nhà": "emergencyAlertSent",
+  "Người dùng xác nhận an toàn": "userConfirmedSafe",
+  "Đã gửi lời nhắc uống thuốc": "reminderSent",
+  "Đã uống thuốc": "medicineTaken",
+  "Đã uống thuốc buổi sáng": "medicineTaken",
+  "Người dùng đã xác nhận uống thuốc": "medicineTaken",
+  "Không phản hồi": "noResponse",
+  "Không có phản hồi sau 3 lần nhắc uống thuốc": "noResponseAfterThreeReminders",
+  "Đã ăn sáng": "ateMeal",
+  "Phát hiện ngã tại phòng khách": "fallDetectedLivingRoom",
+  "Phát hiện ngã (demo)": "fallDetected",
+  "Robot Chami mất kết nối": "robotDisconnected",
+};
+
+function translateStatus(status) {
+  const normalized = String(status || "").toLowerCase();
+  return uiText(statusTranslationKeys[normalized] || normalized || "unknown");
+}
+
+function getDisplayMedicineName(name) {
+  if (!name) return uiText("genericMedicine");
+  const key = demoMedicineNameKeys[name];
+  return key ? uiText(key) : name;
+}
+
+function getDisplayDeviceName(device) {
+  const id = getDeviceId(device);
+  const key =
+    demoDeviceNameKeys[id] ||
+    (isLightDevice(device) ? "livingRoomLight" : null) ||
+    (isAirconDevice(device) ? "airConditioner" : null);
+  return key ? uiText(key) : device?.name || id || uiText("unknown");
+}
+
+function translateKnownSystemMessage(message) {
+  if (!message) return "";
+  const key = legacySystemMessageKeys[String(message).trim()];
+  return key ? uiText(key) : message;
+}
+
+function getSystemMessageDisplay(record) {
+  if (record?.messageKey) return uiText(record.messageKey);
+  return translateKnownSystemMessage(record?.message);
+}
+
 const MEDICINE_REMINDER_TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const MEDICINE_CARE_TYPES = new Set([
   "medicine_reminder_sent",
@@ -39,13 +406,26 @@ const MEDICINE_CARE_TYPES = new Set([
 ]);
 let latestMedicineReminders = [];
 let latestMedicineCareLogs = [];
+let latestAlerts = [];
+let latestCareLogs = [];
+let latestCaregiverNotifications = [];
+let latestFallAlerts = [];
+let commandToastListenerPrimed = false;
+let latestWeatherState = { status: "loading", data: null };
+let environmentClockIntervalId = null;
+let weatherRefreshIntervalId = null;
+let lastWeatherFetchAt = 0;
+let environmentWidgetStarted = false;
 let editingMedicineReminderId = null;
 const medicineReminderRequests = new Set();
+const commandToastSeen = new Set();
+const commandToastRecentFingerprints = new Map();
+const activeCommandToasts = [];
 
 function updateRobotSection(robot) {
   // Update overview cards
   document.getElementById("robot-status-text").textContent =
-    robot?.status || "offline";
+    robot?.status ? translateStatus(robot.status) : uiText("offline");
   document.getElementById("robot-battery-text").textContent =
     robot?.battery != null ? robot.battery + "%" : "—";
 
@@ -55,7 +435,11 @@ function updateRobotSection(robot) {
   if (batteryDisplay)
     batteryDisplay.textContent =
       robot?.battery != null ? robot.battery + "%" : "—%";
-  if (statusDisplay) statusDisplay.textContent = robot?.status || "offline";
+  if (statusDisplay) {
+    statusDisplay.textContent = robot?.status
+      ? translateStatus(robot.status)
+      : uiText("offline");
+  }
 }
 
 function updateDevicesSection(devices) {
@@ -119,11 +503,11 @@ function getSmartHomeDevicesForDisplay(devices) {
 }
 
 function getLightDisplayName() {
-  return "Đèn phòng khách";
+  return uiText("livingRoomLight");
 }
 
 function getLightStatusText(status) {
-  return status === "on" ? "Đèn đang bật" : "Đèn đang tắt";
+  return status === "on" ? uiText("lightOnStatus") : uiText("lightOffStatus");
 }
 
 function toggleLocalLightDisplayState() {
@@ -146,12 +530,12 @@ function toggleLocalLightDisplayState() {
 
 function getLightCommandText(action) {
   const textByAction = {
-    on: "Bật đèn phòng khách",
-    off: "Tắt đèn phòng khách",
-    toggle: "Đổi trạng thái đèn phòng khách",
+    on: uiText("turnLightOn"),
+    off: uiText("turnLightOff"),
+    toggle: uiText("toggleLight"),
   };
 
-  return textByAction[action] || "Điều khiển đèn phòng khách";
+  return textByAction[action] || uiText("toggleLight");
 }
 
 function getBridgeApiBaseUrl() {
@@ -255,7 +639,7 @@ async function sendIRCommand(key) {
   };
   const payload = await createBackendSmartHomeCommand(command);
 
-  console.log("Đã gửi lệnh tới IR Hub", {
+  console.log("Dashboard: IR Hub command sent", {
     commandId: payload?.commandId || null,
     targetDeviceId: command.targetDeviceId,
     type: command.type,
@@ -294,10 +678,10 @@ function normalizeRobotForDisplay(robot) {
   if (!robot) {
     return {
       online: false,
-      statusText: "offline",
-      detailText: "offline",
+      statusText: uiText("offline"),
+      detailText: uiText("offline"),
       batteryText: "--",
-      lastSeenText: "No recent update",
+      lastSeenText: uiText("noRecentUpdate"),
     };
   }
 
@@ -316,15 +700,18 @@ function normalizeRobotForDisplay(robot) {
     ? robot.lastSeen || robot.updatedAt
     : robot.lastSeen || robot.updatedAt || robot.lastActive;
   const detailParts = isOnline
-    ? [isOnline ? "online" : "offline", state, emotion].filter(Boolean)
-    : [isBridgeChamiDevice(robot) ? "offline" : state || "offline", "mất kết nối"];
+    ? [uiText("online"), translateStatus(state), emotion].filter(Boolean)
+    : [
+        isBridgeChamiDevice(robot) ? uiText("offline") : translateStatus(state || "offline"),
+        uiText("disconnected"),
+      ];
 
   return {
     online: isOnline,
-    statusText: isOnline ? "online" : "offline",
+    statusText: isOnline ? uiText("online") : uiText("offline"),
     detailText: detailParts.join(" / "),
     batteryText: robot.battery != null ? robot.battery + "%" : "--",
-    lastSeenText: lastSeen ? formatDateTime(lastSeen) : "No recent update",
+    lastSeenText: lastSeen ? formatDateTime(lastSeen) : uiText("noRecentUpdate"),
   };
 }
 
@@ -371,19 +758,23 @@ function refreshRobotPresenceDisplay() {
 }
 
 function updateAlertsSection(alerts) {
-  document.getElementById("alerts-count").textContent = alerts.length || 0;
-  renderAlerts(alerts);
+  latestAlerts = alerts || [];
+  document.getElementById("alerts-count").textContent = latestAlerts.length || 0;
+  renderAlerts(latestAlerts);
 }
 
 function updateCareLogsSection(logs) {
-  renderCareLogs(logs);
+  latestCareLogs = logs || [];
+  renderCareLogs(latestCareLogs);
 }
 
 function updateCaregiverNotificationsSection(records) {
-  renderCaregiverNotifications(records);
+  latestCaregiverNotifications = records || [];
+  renderCaregiverNotifications(latestCaregiverNotifications);
 }
 
 function updateHealthConcernsSection(records) {
+  latestHealthConcerns = records || [];
   renderHealthConcerns(records);
 }
 
@@ -396,30 +787,46 @@ function renderDevices(devices) {
     item.className = "device-item";
     const isLight = isLightDevice(d);
     const isAircon = isAirconDevice(d);
+    const deviceName = getDisplayDeviceName(d);
     const deviceDetail = isLight
       ? d.status === "on"
-        ? "Đèn đang bật"
-        : "Đèn đang tắt"
+        ? uiText("lightOnStatus")
+        : uiText("lightOffStatus")
+      : isAircon
+        ? d.status === "on"
+          ? uiText("airconOnStatus")
+          : uiText("airconOffStatus")
       : d.room || "";
     const leftDiv = document.createElement("div");
     leftDiv.className = "left";
-    leftDiv.innerHTML = `<strong>${d.name}</strong><small>${deviceDetail}</small>`;
+    leftDiv.innerHTML = `<strong>${deviceName}</strong><small>${deviceDetail}</small>`;
 
     const btn = document.createElement("button");
     btn.className = "device-toggle";
     btn.dataset.id = d.id || d.deviceId || "";
     btn.textContent = isLight
       ? d.status === "on"
-        ? "Tắt đèn"
-        : "Bật đèn"
-      : (d.status === "on" ? "✓ " : "") + "Toggle";
+        ? uiText("turnLightOff")
+        : uiText("turnLightOn")
+      : isAircon
+        ? d.status === "on"
+          ? uiText("turnAirconOff")
+          : uiText("turnAirconOn")
+        : d.status === "on"
+          ? `${uiText("on")} · ${uiText("toggle")}`
+          : uiText("toggle");
     btn.onclick = async () => {
       const id = btn.dataset.id;
 
       if (isLight) {
         const action = d.status === "on" ? "off" : "on";
-        await createLightControlCommand(action);
-        alert("Smart home command created");
+        const payload = await createLightControlCommand(action);
+        showCommandToast({
+          ...payload,
+          key: "room_light_power",
+          type: "ir_send",
+          status: "pending",
+        });
         return;
       }
 
@@ -430,7 +837,13 @@ function renderDevices(devices) {
         status: "pending",
         source: "web_dashboard",
       });
-      alert("Command created (demo)");
+      showCommandToast({
+        targetType: "device",
+        targetId: id,
+        command: "toggle",
+        status: "pending",
+        source: "web_dashboard",
+      });
     };
 
     item.appendChild(leftDiv);
@@ -447,13 +860,13 @@ renderDevices = function (devices) {
     item.className = "device-item";
     const isLight = isLightDevice(d);
     const isAircon = isAirconDevice(d);
-    const deviceName = isLight ? getLightDisplayName() : d.name;
+    const deviceName = getDisplayDeviceName(d);
     const deviceDetail = isLight
       ? getLightStatusText(d.status)
       : isAircon
         ? d.status === "on"
-          ? "Điều hòa đang bật"
-          : "Điều hòa đang tắt"
+          ? uiText("airconOnStatus")
+          : uiText("airconOffStatus")
         : d.room || "";
     const leftDiv = document.createElement("div");
     leftDiv.className = "left";
@@ -463,28 +876,40 @@ renderDevices = function (devices) {
     btn.className = "device-toggle";
     btn.dataset.id = d.id || d.deviceId || "";
     btn.textContent = isLight
-      ? "Bật / Tắt đèn"
+      ? uiText("toggleLight")
       : isAircon
         ? d.status === "on"
-          ? "Tắt điều hòa"
-          : "Bật điều hòa"
-        : (d.status === "on" ? "✓ " : "") + "Toggle";
+          ? uiText("turnAirconOff")
+          : uiText("turnAirconOn")
+        : d.status === "on"
+          ? `${uiText("on")} · ${uiText("toggle")}`
+          : uiText("toggle");
     btn.onclick = async () => {
       const id = btn.dataset.id;
       btn.disabled = true;
 
       try {
         if (isLight) {
-          await createLightControlCommand();
+          const payload = await createLightControlCommand();
           toggleLocalLightDisplayState();
-          alert("Đã gửi lệnh tới IR Hub");
+          showCommandToast({
+            ...payload,
+            key: "room_light_power",
+            type: "ir_send",
+            status: "pending",
+          });
           return;
         }
 
         if (isAircon) {
           const action = d.status === "on" ? "off" : "on";
-          await createAirconControlCommand(action);
-          alert("Đã gửi lệnh tới IR Hub");
+          const payload = await createAirconControlCommand(action);
+          showCommandToast({
+            ...payload,
+            key: action === "off" ? "ac_off" : "ac_cool_26",
+            type: "ir_send",
+            status: "pending",
+          });
           return;
         }
 
@@ -495,10 +920,23 @@ renderDevices = function (devices) {
           status: "pending",
           source: "web_dashboard",
         });
-        alert("Command created (demo)");
+        showCommandToast({
+          targetType: "device",
+          targetId: id,
+          command: "toggle",
+          status: "pending",
+          source: "web_dashboard",
+        });
       } catch (error) {
-        console.error("Không gửi được lệnh", error);
-        alert("Không gửi được lệnh");
+        console.error("Dashboard: command send failed", error);
+        showCommandToast(
+          {
+            targetId: id,
+            command: isLight ? "living_room_light" : isAircon ? "air_conditioner_on" : "toggle",
+            status: "failed",
+          },
+          { status: "failed", dedupe: false },
+        );
       } finally {
         btn.disabled = false;
       }
@@ -512,59 +950,90 @@ renderDevices = function (devices) {
 
 function getAlertTypeLabel(type) {
   const labels = {
-    fall_detected: "Phát hiện ngã",
-    emergency_response: "Phản hồi khẩn cấp",
-    robot_offline: "Robot mất kết nối",
-    low_battery: "Pin yếu",
-    no_response: "Không phản hồi",
-    medicine_missed: "Chưa uống thuốc",
-    medicine_taken: "Đã uống thuốc",
-    medicine_no_response: "Không phản hồi nhắc thuốc",
+    fall_detected: uiText("fallDetected"),
+    emergency_response: uiText("emergencyResponse"),
+    robot_offline: uiText("robotDisconnected"),
+    low_battery: uiText("lowBattery"),
+    no_response: uiText("noResponse"),
+    medicine_missed: uiText("medicineMissed"),
+    medicine_taken: uiText("medicineTaken"),
+    medicine_no_response: uiText("medicineNoResponse"),
+    health_concern: uiText("healthHistory"),
+    meal: uiText("ateMeal"),
+    response: uiText("response"),
   };
 
-  return labels[type] || type || "Cảnh báo";
+  return labels[type] || type || uiText("alerts");
 }
 
 function getAlertSourceLabel(source) {
   const labels = {
-    camera_ai: "Camera AI",
-    fall_camera: "Fall Camera",
-    chami_001: "Chami Robot",
-    robot_chami: "Chami Robot",
-    health_module: "Health Module",
-    smart_home: "Smart Home",
-    web_dashboard: "Web Dashboard",
-    demo: "Demo Mode",
+    camera_ai: uiText("cameraAi"),
+    fall_camera: uiText("fallCamera"),
+    chami_001: uiText("chamiRobot"),
+    robot_chami: uiText("chamiRobot"),
+    health_module: uiText("healthModule"),
+    smart_home: uiText("smartHome"),
+    web_dashboard: uiText("webDashboard"),
+    demo: uiText("demoMode"),
   };
 
-  return labels[source] || "Không rõ nguồn";
+  return labels[source] || uiText("unknownSource");
 }
 
 function getLineStatusLabel(status) {
   const labels = {
-    pending: "LINE: Đang gửi",
-    sent: "LINE: Đã gửi",
-    failed: "LINE: Lỗi",
+    pending: `LINE: ${uiText("pending")}`,
+    sent: `LINE: ${uiText("sent")}`,
+    failed: `LINE: ${uiText("failed")}`,
   };
 
-  return labels[status] || "LINE: Demo";
+  return labels[status] || `LINE: ${uiText("demoMode")}`;
+}
+
+function getAlertMessageDisplay(alert) {
+  if (alert?.type === "health_concern") {
+    return getHealthMessageDisplay(alert);
+  }
+
+  return getSystemMessageDisplay(alert);
 }
 
 function getCaregiverNotificationStatus(record) {
   const status = String(record?.status || "").toLowerCase();
   if (status === "sent") {
-    return { label: "Đã gửi LINE", badge: "Sent", className: "is-sent" };
+    return { label: `LINE ${uiText("sent")}`, badge: uiText("sent"), className: "is-sent" };
   }
   if (status === "partial") {
-    return { label: "Gửi một phần", badge: "Partial", className: "is-partial" };
+    return { label: uiText("partialSent"), badge: uiText("partial"), className: "is-partial" };
   }
   if (status === "failed") {
-    return { label: "Gửi thất bại", badge: "Failed", className: "is-failed" };
+    return { label: uiText("sendFailed"), badge: uiText("failed"), className: "is-failed" };
   }
   if (status === "skipped") {
-    return { label: "Bỏ qua trùng", badge: "Skipped", className: "is-skipped" };
+    return { label: uiText("duplicateSkipped"), badge: uiText("skipped"), className: "is-skipped" };
   }
-  return { label: "Đang gửi LINE", badge: "Pending", className: "is-pending" };
+  return { label: `LINE ${uiText("pending")}`, badge: uiText("pending"), className: "is-pending" };
+}
+
+function getCaregiverNotificationDetail(record) {
+  const failed = String(record?.status || "").toLowerCase() === "failed";
+  if (failed && record?.lastError) return record.lastError;
+
+  if (
+    record?.sourceEventType === "health_concern" ||
+    record?.eventType === "health_concern"
+  ) {
+    const symptomMessage = getHealthMessageDisplay(record);
+    if (symptomMessage) return symptomMessage;
+  }
+
+  return (
+    translateKnownSystemMessage(record?.messagePreview) ||
+    translateKnownSystemMessage(record?.lastError) ||
+    record?.eventType ||
+    uiText("caregiverNotifications")
+  );
 }
 
 function renderCaregiverNotifications(records) {
@@ -579,8 +1048,11 @@ function renderCaregiverNotifications(records) {
   const hiddenCount = Math.max(sorted.length - visible.length, 0);
 
   if (visible.length === 0) {
-    el.innerHTML =
-      '<div class="empty-state compact-empty">Chưa có thông báo LINE</div>';
+    el.innerHTML = "";
+    const empty = document.createElement("div");
+    empty.className = "empty-state compact-empty";
+    empty.textContent = uiText("noLineNotifications");
+    el.appendChild(empty);
     return;
   }
 
@@ -596,13 +1068,7 @@ function renderCaregiverNotifications(records) {
     title.textContent = presentation.label;
 
     const detail = document.createElement("small");
-    const failed = String(record.status || "").toLowerCase() === "failed";
-    const detailText =
-      (failed && record.lastError) ||
-      record.messagePreview ||
-      record.lastError ||
-      record.eventType ||
-      "Thông báo người chăm sóc";
+    const detailText = getCaregiverNotificationDetail(record);
     detail.textContent = `${detailText} • ${formatMedicineTime(
       record.sentAt || record.createdAt || record.updatedAt,
     )}`;
@@ -616,37 +1082,29 @@ function renderCaregiverNotifications(records) {
     el.appendChild(item);
   });
 
-  appendCompactMore(el, hiddenCount, "thông báo cũ hơn");
+  appendCompactMore(el, hiddenCount, uiText("olderNotifications"));
 }
 
 function getHealthSymptomLabel(symptom) {
-  const labels = {
-    fatigue: "強い疲労",
-    headache: "頭痛",
-    dizziness: "めまい",
-    breathing: "呼吸困難",
-    chest_pain: "胸の痛み",
-    abdominal_pain: "腹痛",
-    nausea: "吐き気",
-    sleep_problem: "睡眠障害",
-    heart: "動悸・心拍異常",
-    weakness_or_numbness: "しびれ・脱力",
-    fever: "発熱",
-    fainting: "失神・意識低下",
-    pain_general: "強い痛み",
-    direct_help: "助けを求める発言",
-  };
-  return labels[symptom] || "健康症状";
+  const key = `health.symptom.${symptom}`;
+  const label = uiText(key);
+  return label === key ? uiText("healthSymptomFallback") : label;
+}
+
+function getHealthMessageDisplay(record) {
+  const mapped = uiText(`health.message.${record?.symptom}`);
+  if (mapped && mapped !== `health.message.${record?.symptom}`) return mapped;
+  return getSystemMessageDisplay(record) || uiText("healthFallback");
 }
 
 function getHealthLevelPresentation(level) {
   if (level === "danger") {
-    return { label: "緊急", className: "is-danger" };
+    return { label: uiText("danger"), className: "is-danger" };
   }
   if (level === "warning") {
-    return { label: "注意", className: "is-warning" };
+    return { label: uiText("warning"), className: "is-warning" };
   }
-  return { label: "情報", className: "is-info" };
+  return { label: uiText("info"), className: "is-info" };
 }
 
 function renderHealthConcerns(records) {
@@ -654,16 +1112,19 @@ function renderHealthConcerns(records) {
   if (!el) return;
   el.replaceChildren();
 
-  const sorted = sortByNewest(records || [], (record) =>
-    getTimeValue(record.createdAt || record.receivedAt),
+  const sorted = sortByNewest((records || []).slice(0, HEALTH_CONVERSATION_MAX_RECORDS), (record) =>
+    getTimeValue(record.createdAtMs || record.createdAt || record.receivedAt),
   );
-  const visible = sorted.slice(0, HEALTH_CONVERSATION_DISPLAY_LIMIT);
+  const displayLimit = healthConversationExpanded
+    ? HEALTH_CONVERSATION_MAX_RECORDS
+    : HEALTH_CONVERSATION_COLLAPSED_LIMIT;
+  const visible = sorted.slice(0, displayLimit);
   const hiddenCount = Math.max(sorted.length - visible.length, 0);
 
   if (visible.length === 0) {
     const empty = document.createElement("div");
     empty.className = "empty-state";
-    empty.textContent = "健康に関する会話履歴はありません。";
+    empty.textContent = uiText("noHealthHistory");
     el.appendChild(empty);
     return;
   }
@@ -678,50 +1139,66 @@ function renderHealthConcerns(records) {
 
     const heading = document.createElement("div");
     heading.className = "health-concern-heading";
+    const icon = document.createElement("span");
+    icon.className = `health-concern-dot ${presentation.className}`;
+    icon.setAttribute("aria-hidden", "true");
     const title = document.createElement("strong");
     title.textContent = getHealthSymptomLabel(record.symptom);
     const badge = document.createElement("span");
     badge.className = `health-level-badge ${presentation.className}`;
     badge.textContent = presentation.label;
-    heading.append(title, badge);
+    heading.append(icon, title, badge);
 
     const message = document.createElement("p");
     message.className = "health-concern-message";
-    message.textContent = record.message || "健康状態に関する会話を検知しました。";
+    message.textContent = getHealthMessageDisplay(record);
 
+    const footer = document.createElement("div");
+    footer.className = "health-concern-footer";
     const meta = document.createElement("div");
     meta.className = "health-concern-meta";
     [
-      formatDateTime(record.createdAt || record.receivedAt),
+      formatDateTime(record.createdAtMs || record.createdAt || record.receivedAt),
       record.language || "unknown",
       record.deviceId || record.source || "chami_001",
-      record.resolved ? "対応済み" : "未対応",
     ].forEach((value) => {
       const span = document.createElement("span");
       span.textContent = value;
       meta.appendChild(span);
     });
 
-    main.append(heading, message, meta);
+    const status = document.createElement("span");
+    status.className = record.resolved
+      ? "health-status-badge is-resolved"
+      : `health-status-badge ${record.level === "danger" ? "is-open-danger" : "is-open"}`;
+    status.textContent = record.resolved ? uiText("resolved") : uiText("unresolved");
+    footer.append(meta, status);
+
+    main.append(heading, message, footer);
     item.appendChild(main);
 
     if (!record.resolved) {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "health-resolve-button";
-      button.textContent = "対応済み";
+      button.textContent = uiText("resolved");
       button.addEventListener("click", async () => {
         try {
           button.disabled = true;
+          button.textContent = uiText("saving");
           try {
             await resolveBackendHealthConcern(record.id);
           } catch (backendError) {
             console.warn("Dashboard: backend health resolve failed", backendError);
             await FirebaseService.resolveHealthConcern(record.id);
           }
+          status.className = "health-status-badge is-resolved";
+          status.textContent = uiText("resolved");
+          button.remove();
         } catch (error) {
           console.error("Dashboard: health concern resolve failed", error);
           button.disabled = false;
+          button.textContent = uiText("resolved");
         }
       });
       item.appendChild(button);
@@ -730,7 +1207,21 @@ function renderHealthConcerns(records) {
     el.appendChild(item);
   });
 
-  appendCompactMore(el, hiddenCount, "古い履歴");
+  if (sorted.length > HEALTH_CONVERSATION_COLLAPSED_LIMIT) {
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "health-history-toggle";
+    toggle.textContent = healthConversationExpanded
+      ? uiText("collapse")
+      : `${uiText("showAll")} (${Math.min(sorted.length, HEALTH_CONVERSATION_MAX_RECORDS)})`;
+    toggle.addEventListener("click", () => {
+      healthConversationExpanded = !healthConversationExpanded;
+      renderHealthConcerns(sorted);
+    });
+    el.appendChild(toggle);
+  } else {
+    appendCompactMore(el, hiddenCount, uiText("oldHistory"));
+  }
 }
 
 function getTimeValue(value) {
@@ -759,10 +1250,14 @@ function getTimeValue(value) {
 function formatMedicineTime(value) {
   const timestamp = getTimeValue(value);
   if (!timestamp) return "--:--";
-  return new Date(timestamp).toLocaleTimeString("vi-VN", {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return new Date(timestamp).toLocaleTimeString(
+    getUiLanguage() === "vi" ? "vi-VN" : "ja-JP",
+    {
+      timeZone: TOKYO_TIMEZONE,
+      hour: "2-digit",
+      minute: "2-digit",
+    },
+  );
 }
 
 function isValidMedicineCareLog(log) {
@@ -792,42 +1287,45 @@ function getMedicineCarePresentation(log) {
     : latestMedicineReminders.length === 1
       ? latestMedicineReminders[0]
       : null;
-  const medicineName =
-    log.medicineName ||
-    linkedReminder?.medicineName ||
-    "Thuốc";
+  const medicineName = getDisplayMedicineName(
+    log.medicineName || linkedReminder?.medicineName,
+  );
   const time = formatMedicineTime(log.createdAt || log.receivedAt);
-  const demoLabel = log.source === "demo" ? "Demo" : "";
+  const demoLabel = log.source === "demo" ? uiText("demoMode") : "";
 
   if (log.type === "medicine_taken") {
     return {
-      title: "Đã uống thuốc",
-      detail: `${medicineName} • xác nhận ở lần ${log.attempt} • ${time}`,
-      badge: "Confirmed",
+      title: uiText("medicineTaken"),
+      detail: `${medicineName} • ${uiText("confirmed")} ${uiText("attempt")} ${log.attempt} • ${time}`,
+      badge: uiText("confirmed"),
       status: "confirmed",
-      cardText: `Đã uống lúc ${time}`,
-      cardDetail: `Xác nhận lần ${log.attempt}`,
+      cardText: `${uiText("takenAt")} ${time}`,
+      cardDetail: `${uiText("confirmed")} ${uiText("attempt")} ${log.attempt}`,
       demoLabel,
     };
   }
   if (log.type === "medicine_no_response") {
     const attempts = Number.isInteger(log.attempts) ? log.attempts : 3;
+    const title =
+      attempts === 3
+        ? uiText("noResponseAfterThreeReminders")
+        : `${uiText("noResponse")} ${attempts} ${uiText("afterAttempts")}`;
     return {
-      title: `Không phản hồi sau ${attempts} lần nhắc`,
+      title,
       detail: `${medicineName} • ${time}`,
-      badge: "No response",
+      badge: uiText("noResponse"),
       status: "no-response",
-      cardText: `Không phản hồi lúc ${time}`,
-      cardDetail: `Sau ${attempts} lần nhắc`,
+      cardText: `${uiText("noResponseAt")} ${time}`,
+      cardDetail: `${attempts} ${uiText("afterAttempts")}`,
       demoLabel,
     };
   }
   return {
-    title: MEDICINE_REMINDER_SENT_MESSAGE,
+    title: uiText("reminderSent"),
     detail: `${medicineName} • ${time}`,
-    badge: "Sent",
+    badge: uiText("sent"),
     status: "sent",
-    cardText: `Đã gửi lúc ${time}`,
+    cardText: `${uiText("sentAt")} ${time}`,
     cardDetail: "",
     demoLabel,
   };
@@ -879,30 +1377,23 @@ function getRealtimeCommandTimestamp() {
 }
 
 function formatDateTime(value) {
-  if (!value) return "Không rõ thời gian";
+  if (!value) return uiText("unknownTime");
 
-  // Firestore Timestamp support
-  if (typeof value.toDate === "function") {
-    return value.toDate().toLocaleString("vi-VN");
-  }
-
-  return new Date(value).toLocaleString("vi-VN");
-}
-formatDateTime = function (value) {
-  if (!value) return "Unknown time";
+  const locale = getUiLanguage() === "vi" ? "vi-VN" : "ja-JP";
+  const options = { timeZone: TOKYO_TIMEZONE };
 
   if (typeof value.toDate === "function") {
-    return value.toDate().toLocaleString("ja-JP");
+    return value.toDate().toLocaleString(locale, options);
   }
 
   const date = new Date(value);
 
   if (Number.isNaN(date.getTime())) {
-    return "Unknown time";
+    return uiText("unknownTime");
   }
 
-  return date.toLocaleString("ja-JP");
-};
+  return date.toLocaleString(locale, options);
+}
 
 function getMedicineReminderEls() {
   return {
@@ -932,11 +1423,11 @@ function getMedicineReminderFormData() {
   const time = (timeInput?.value || "").trim();
 
   if (!medicineName) {
-    throw new Error("Tên thuốc không được rỗng");
+    throw new Error(uiText("medicineNameRequired"));
   }
 
   if (!MEDICINE_REMINDER_TIME_RE.test(time)) {
-    throw new Error("Giờ uống phải đúng định dạng HH:mm");
+    throw new Error(uiText("medicineTimeInvalid"));
   }
 
   return {
@@ -967,7 +1458,7 @@ function renderMedicineReminders(reminders) {
   if (!latestMedicineReminders.length) {
     const empty = document.createElement("p");
     empty.className = "medicine-reminder-empty";
-    empty.textContent = "Chưa có lịch nhắc thuốc.";
+    empty.textContent = uiText("noMedicineReminders");
     list.appendChild(empty);
     renderLatestMedicineFollowup();
     return;
@@ -995,39 +1486,39 @@ function renderMedicineReminders(reminders) {
     checkbox.dataset.reminderId = reminder.id;
     checkbox.setAttribute(
       "aria-label",
-      `${checkbox.checked ? "Tắt" : "Bật"} lịch ${reminder.medicineName || ""}`,
+      `${checkbox.checked ? uiText("off") : uiText("on")} ${getDisplayMedicineName(reminder.medicineName)}`,
     );
     const toggleText = document.createElement("span");
-    toggleText.textContent = checkbox.checked ? "Bật" : "Tắt";
+    toggleText.textContent = checkbox.checked ? uiText("on") : uiText("off");
     toggle.append(checkbox, toggleText);
     top.append(time, toggle);
 
     const name = document.createElement("div");
     name.className = "medicine-alarm-name";
-    name.textContent = reminder.medicineName || "Thuốc";
+    name.textContent = getDisplayMedicineName(reminder.medicineName);
 
     const meta = document.createElement("div");
     meta.className = "medicine-alarm-meta";
     const repeat = document.createElement("span");
-    repeat.textContent = "Hằng ngày";
+    repeat.textContent = uiText("everyDay");
     const timezone = document.createElement("span");
-    timezone.textContent = reminder.timezone || "Asia/Tokyo";
+    timezone.textContent = reminder.timezone || TOKYO_TIMEZONE;
     meta.append(repeat, timezone);
 
     const actions = document.createElement("div");
     actions.className = "medicine-reminder-actions medicine-alarm-actions";
     actions.append(
-      createMedicineActionButton("edit", reminder.id, "Sửa"),
+      createMedicineActionButton("edit", reminder.id, uiText("edit")),
       createMedicineActionButton(
         "delete",
         reminder.id,
-        "Xóa",
+        uiText("delete"),
         "medicine-delete-button",
       ),
       createMedicineActionButton(
         "now",
         reminder.id,
-        "Nhắc ngay",
+        uiText("remindNow"),
         "primary",
       ),
     );
@@ -1035,7 +1526,7 @@ function renderMedicineReminders(reminders) {
     if (reminder.lastTriggeredAt) {
       const lastTriggered = document.createElement("small");
       lastTriggered.className = "medicine-reminder-last-triggered";
-      lastTriggered.textContent = `Lần gần nhất: ${formatDateTime(
+      lastTriggered.textContent = `${uiText("lastRun")}: ${formatDateTime(
         reminder.lastTriggeredAt,
       )}`;
       meta.appendChild(lastTriggered);
@@ -1060,7 +1551,9 @@ function openMedicineReminderDialog(reminder = null) {
 
   editingMedicineReminderId = reminder?.id || null;
   if (dialogTitle) {
-    dialogTitle.textContent = reminder ? "Sửa lịch nhắc" : "Thêm lịch nhắc";
+    dialogTitle.textContent = reminder
+      ? uiText("editMedicineReminder")
+      : uiText("addMedicineReminder");
   }
   if (nameInput) nameInput.value = reminder?.medicineName || "";
   if (timeInput) {
@@ -1097,16 +1590,16 @@ async function saveMedicineReminderFromDashboard(event) {
       const reminderId = editingMedicineReminderId;
       await FirebaseService.updateMedicineReminder(reminderId, payload);
       console.log(`Dashboard: medicine reminder updated id=${reminderId}`);
-      setMedicineReminderStatus("Đã cập nhật lịch nhắc thuốc");
+      setMedicineReminderStatus(uiText("medicineReminderUpdated"));
     } else {
       const created = await FirebaseService.createMedicineReminder(payload);
       console.log(`Dashboard: medicine reminder created id=${created.id}`);
-      setMedicineReminderStatus("Đã thêm lịch nhắc thuốc");
+      setMedicineReminderStatus(uiText("medicineReminderAdded"));
     }
     closeMedicineReminderDialog();
   } catch (error) {
     console.error("Dashboard: medicine reminder save failed", error);
-    setMedicineReminderStatus(error.message || "Không thể lưu lịch nhắc thuốc");
+    setMedicineReminderStatus(error.message || uiText("medicineReminderSaveFailed"));
   } finally {
     if (saveButton) saveButton.disabled = false;
   }
@@ -1120,12 +1613,12 @@ async function updateMedicineReminderEnabled(reminderId, enabled, checkbox) {
       `Dashboard: medicine reminder toggled id=${reminderId} enabled=${enabled}`,
     );
     setMedicineReminderStatus(
-      enabled ? "Đã bật lịch nhắc thuốc" : "Đã tắt lịch nhắc thuốc",
+      enabled ? uiText("medicineReminderEnabled") : uiText("medicineReminderDisabled"),
     );
   } catch (error) {
     checkbox.checked = !enabled;
     console.error("Dashboard: medicine reminder toggle failed", error);
-    setMedicineReminderStatus("Không thể đổi trạng thái lịch nhắc thuốc");
+    setMedicineReminderStatus(uiText("medicineReminderToggleFailed"));
   } finally {
     checkbox.disabled = false;
   }
@@ -1136,17 +1629,17 @@ async function removeMedicineReminder(reminderId) {
     (item) => item.id === reminderId,
   );
   if (!reminder) return;
-  if (!window.confirm(`Xóa lịch “${reminder.medicineName}” lúc ${reminder.time}?`)) {
+  if (!window.confirm(`${uiText("delete")} “${reminder.medicineName}” ${reminder.time}?`)) {
     return;
   }
 
   try {
     await FirebaseService.deleteMedicineReminder(reminderId);
     console.log(`Dashboard: medicine reminder deleted id=${reminderId}`);
-    setMedicineReminderStatus("Đã xóa lịch nhắc thuốc");
+    setMedicineReminderStatus(uiText("medicineReminderDeleted"));
   } catch (error) {
     console.error("Dashboard: medicine reminder delete failed", error);
-    setMedicineReminderStatus("Không thể xóa lịch nhắc thuốc");
+    setMedicineReminderStatus(uiText("medicineReminderDeleteFailed"));
   }
 }
 
@@ -1166,8 +1659,8 @@ async function createMedicineReminderNowCommand(reminderId, button) {
     if (result?.skipped) {
       setMedicineReminderStatus(
         result.reason === "pending_same_reminder"
-          ? "Lịch này đã có yêu cầu đang chờ xử lý"
-          : "Chami đang xử lý một lời nhắc thuốc khác",
+          ? uiText("pendingSameReminder")
+          : uiText("robotBusyReminder"),
       );
       return;
     }
@@ -1175,10 +1668,28 @@ async function createMedicineReminderNowCommand(reminderId, button) {
     console.log(
       `Dashboard: immediate reminder command created reminderId=${reminderId}`,
     );
-    setMedicineReminderStatus("Đã tạo yêu cầu nhắc ngay");
+    showCommandToast({
+      ...(result?.command || {}),
+      action: "remind_medicine",
+      type: "robot_action",
+      reminderId,
+      medicineName: reminder.medicineName,
+      status: "pending",
+    });
+    setMedicineReminderStatus(uiText("medicineReminderImmediateCreated"));
   } catch (error) {
     console.error("Dashboard: immediate medicine reminder failed", error);
-    setMedicineReminderStatus("Không thể tạo yêu cầu nhắc ngay");
+    showCommandToast(
+      {
+        action: "remind_medicine",
+        type: "robot_action",
+        reminderId,
+        medicineName: reminder.medicineName,
+        status: "failed",
+      },
+      { status: "failed", dedupe: false },
+    );
+    setMedicineReminderStatus(uiText("medicineReminderImmediateFailed"));
   } finally {
     medicineReminderRequests.delete(reminderId);
     button.disabled = false;
@@ -1241,7 +1752,7 @@ function bindMedicineReminderDashboard() {
         `Dashboard: medicine reminders loaded count=${reminders.length}`,
       );
       if (!reminders.length) {
-        setMedicineReminderStatus("Chưa có lịch nhắc thuốc");
+        setMedicineReminderStatus(uiText("noMedicineReminders"));
       }
     });
   }
@@ -1303,7 +1814,7 @@ function isNoResponseEmergencyAlert(alert) {
 
 function formatFallTimelineTime(value) {
   const timestamp = getTimeValue(value);
-  if (!timestamp) return "Đang chờ";
+  if (!timestamp) return uiText("pending");
 
   const date = new Date(timestamp);
   const today = new Date();
@@ -1367,28 +1878,28 @@ function getRecentFallResponseCareEvents() {
 
 function getCareEventTitle(event) {
   if (event?.type === "fall_confirmed") {
-    return "Camera phát hiện nguy cơ té ngã";
+    return uiText("cameraFallDetected");
   }
 
   if (event?.type === "chami_command_sent") {
-    return "Đã yêu cầu Chami kiểm tra người dùng";
+    return uiText("chamiCheckRequested");
   }
 
   if (event?.type === "chami_alert_received") {
     if (event.status === "no_response") {
-      return "Không có phản hồi sau thời gian chờ";
+      return uiText("noResponseAfterWait");
     }
 
     if (event.status === "danger") {
-      return "Đã gửi cảnh báo khẩn cấp cho người nhà";
+      return uiText("emergencyAlertSent");
     }
 
     if (event.status === "safe") {
-      return "Người dùng xác nhận an toàn";
+      return uiText("userConfirmedSafe");
     }
   }
 
-  return event?.message || "Sự kiện chăm sóc";
+  return event?.message || uiText("careEvent");
 }
 
 function getCareEventStatus(event) {
@@ -1459,29 +1970,29 @@ function buildCareEventFallResponseTimelineModel() {
     title: getCareEventTitle(event),
     status: getCareEventStatus(event),
     time: event.createdAt,
-    detail: event.detail || event.message || "",
+    detail: translateKnownSystemMessage(event.detail || event.message || ""),
   }));
 
   if (!hasFinalResult && steps.length < 5) {
     steps.push({
       id: "waiting_for_chami_result",
-      title: "Đang chờ kết quả từ Chami",
+      title: uiText("waitingForChamiResult"),
       status: "active",
       time: null,
-      detail: "Chưa có event safe, danger hoặc no_response cho flow này.",
+      detail: uiText("noFinalFallEvent"),
     });
   }
 
-  let summary = "Đang xử lý";
+  let summary = uiText("processing");
   let summaryStatus = "active";
   if (latestResult?.status === "safe") {
-    summary = "An toàn";
+    summary = uiText("safe");
     summaryStatus = "safe";
   } else if (latestResult?.status === "no_response") {
-    summary = "Không phản hồi";
+    summary = uiText("noResponse");
     summaryStatus = "danger";
   } else if (latestResult?.status === "danger") {
-    summary = "Khẩn cấp";
+    summary = uiText("emergency");
     summaryStatus = "danger";
   }
 
@@ -1530,23 +2041,22 @@ function buildAlertFallbackTimelineModel(alert) {
 
   const noResponse = isNoResponseEmergencyAlert(alert);
   const alertTime = alert.createdAt || alert.timelineFallbackAt;
-  const detail =
-    "Dữ liệu camera event chưa có trong care_events, timeline được dựng từ alert mới nhất.";
+  const detail = uiText("cameraEventMissing");
   const resultTitle = noResponse
-    ? "Không có phản hồi sau thời gian chờ"
-    : "Người dùng cần trợ giúp";
+    ? uiText("noResponseAfterWait")
+    : uiText("userNeedsHelp");
   const relatedAlertId =
     alert.id || `chami_${getTimelineTimestamp(alert) || Date.now()}`;
 
   return {
     flowKey: `alert-fallback:${relatedAlertId}`,
     outcome: noResponse ? "no_response" : "danger",
-    summary: noResponse ? "Không phản hồi" : "Khẩn cấp",
+    summary: noResponse ? uiText("noResponse") : uiText("emergency"),
     summaryStatus: "danger",
     steps: [
       {
         id: `${relatedAlertId}_checking`,
-        title: "Chami đã hoàn tất kiểm tra",
+        title: uiText("chamiCheckCompleted"),
         status: "done",
         time: alertTime,
         detail,
@@ -1556,11 +2066,11 @@ function buildAlertFallbackTimelineModel(alert) {
         title: resultTitle,
         status: "danger",
         time: alertTime,
-        detail: alert.message || detail,
+        detail: translateKnownSystemMessage(alert.message) || detail,
       },
       {
         id: `${relatedAlertId}_family_alert`,
-        title: "Đã gửi cảnh báo khẩn cấp cho người nhà",
+        title: uiText("emergencyAlertSent"),
         status: "danger",
         time: alertTime,
         detail,
@@ -1690,17 +2200,15 @@ async function mapChamiEmergencyAlertsToCareEvents(alerts) {
     const nearestFlow = findNearestCareEventFlow(alertTimestamp);
 
     try {
-      const result = await FirebaseService.createCareEvent(
+    const result = await FirebaseService.createCareEvent(
         {
           flow: "fall_response",
           flowId: nearestFlow?.flowId || "",
           source: "chami",
           type: "chami_alert_received",
           status: noResponse ? "no_response" : "danger",
-          message: noResponse
-            ? "Không có phản hồi sau thời gian chờ"
-            : "Người dùng cần trợ giúp",
-          detail: alert.message || "",
+          message: noResponse ? uiText("noResponseAfterWait") : uiText("userNeedsHelp"),
+          detail: translateKnownSystemMessage(alert.message),
           relatedAlertId,
           cameraId: nearestFlow?.cameraId || "default_cam",
           location: nearestFlow?.location || "living_room",
@@ -1772,13 +2280,12 @@ function updateFallResponseTimelineFromCareEvents() {
   if (!model) {
     const empty = document.createElement("div");
     empty.className = "empty-state";
-    empty.textContent = "Chưa có sự kiện ngã gần đây";
+    empty.textContent = uiText("noFallTimeline");
     timeline.appendChild(empty);
     timeline.removeAttribute("role");
     summary.className = "fall-response-summary is-empty";
-    summary.textContent = "Chưa có dữ liệu";
-    note.textContent =
-      "Kết quả an toàn chỉ hiển thị khi Chami gửi care event safe.";
+    summary.textContent = uiText("noData");
+    note.textContent = uiText("fallResponseNote");
     console.log("Dashboard: No recent fall response timeline");
     return;
   }
@@ -1791,16 +2298,13 @@ function updateFallResponseTimelineFromCareEvents() {
   summary.textContent = model.summary;
 
   if (source === "alert_fallback") {
-    note.textContent =
-      "Đang dùng alert emergency_response mới nhất vì care_events chưa có event tương ứng.";
+    note.textContent = uiText("fallbackTimelineNote");
   } else if (model.outcome === "safe") {
-    note.textContent = "Kết quả safe được xác nhận từ care_events.";
+    note.textContent = uiText("safeResultConfirmed");
   } else if (["danger", "no_response"].includes(model.outcome)) {
-    note.textContent =
-      "Kết quả khẩn cấp dùng đúng timestamp của alert Chami được ánh xạ vào care_events.";
+    note.textContent = uiText("emergencyResultMapped");
   } else {
-    note.textContent =
-      "Chưa có event safe, danger hoặc no_response; dashboard không tự suy diễn kết quả.";
+    note.textContent = uiText("noFallInference");
     if (lastMissingSafeFlowKey !== model.flowKey) {
       lastMissingSafeFlowKey = model.flowKey;
       console.log("Dashboard: Safe result log is not available yet");
@@ -1849,18 +2353,18 @@ function renderCameraDeviceStatus(camera) {
   };
   const status = data.status || "offline";
 
-  badge.textContent = status;
+  badge.textContent = translateStatus(status);
   badge.classList.toggle("status-online", status === "online");
   badge.classList.toggle("status-offline", status !== "online");
 
   details.innerHTML = "";
 
   [
-    ["Name", data.name || "Unknown camera"],
-    ["Location", data.location || "unknown"],
-    ["Device type", data.deviceType || "unknown"],
-    ["AI model", data.aiModel || "unknown"],
-    ["Last seen", formatDateTime(data.lastSeen || data.updatedAt)],
+    [uiText("name"), data.name || uiText("unknownCamera")],
+    [uiText("location"), data.location || uiText("unknown")],
+    [uiText("deviceType"), data.deviceType || uiText("unknown")],
+    [uiText("aiModel"), data.aiModel || uiText("unknown")],
+    [uiText("lastSeen"), formatDateTime(data.lastSeen || data.updatedAt)],
   ].forEach(([label, value]) => {
     const item = document.createElement("div");
     const title = document.createElement("dt");
@@ -1887,7 +2391,7 @@ function createFallAlertItem(alert, options = {}) {
 
   const status = document.createElement("span");
   status.className = `fall-alert-status ${getFallAlertStatusClass(alert.status)}`;
-  status.textContent = alert.status || "unknown";
+  status.textContent = translateStatus(alert.status || "unknown");
 
   const headerActions = document.createElement("div");
   headerActions.className = "fall-alert-actions";
@@ -1898,7 +2402,7 @@ function createFallAlertItem(alert, options = {}) {
     const notifyButton = document.createElement("button");
     notifyButton.className = "fall-alert-notify";
     notifyButton.type = "button";
-    notifyButton.textContent = "Notify Chami";
+    notifyButton.textContent = uiText("notifyChami");
     notifyButton.addEventListener("click", () => {
       notifyButton.disabled = true;
       notifyChamiForFallAlert(alert.id).catch(() => {
@@ -1910,7 +2414,7 @@ function createFallAlertItem(alert, options = {}) {
     const resolveButton = document.createElement("button");
     resolveButton.className = "fall-alert-resolve";
     resolveButton.type = "button";
-    resolveButton.textContent = "Mark as resolved";
+    resolveButton.textContent = uiText("markResolved");
     resolveButton.addEventListener("click", () => {
       resolveButton.disabled = true;
       markFallAlertResolved(alert.id).catch(() => {
@@ -1927,9 +2431,9 @@ function createFallAlertItem(alert, options = {}) {
   meta.className = "fall-alert-meta";
 
   [
-    ["Confidence", formatConfidence(alert.confidence)],
-    ["Camera", alert.cameraId || "unknown"],
-    ["Created", formatDateTime(alert.createdAt)],
+    [uiText("confidence"), formatConfidence(alert.confidence)],
+    [uiText("camera"), alert.cameraId || uiText("unknown")],
+    [uiText("created"), formatDateTime(alert.createdAt)],
   ].forEach(([label, value]) => {
     const group = document.createElement("div");
     const dt = document.createElement("dt");
@@ -1979,6 +2483,7 @@ function renderFallAlerts(alerts) {
   if (!activeList || !resolvedList) return;
 
   const data = alerts || [];
+  latestFallAlerts = data;
   const activeAlerts = data.filter((alert) => canResolveFallAlert(alert.status));
   const allResolvedAlerts = sortByNewest(
     data.filter((alert) => alert.status === "resolved"),
@@ -1990,15 +2495,15 @@ function renderFallAlerts(alerts) {
     0,
   );
 
-  renderFallAlertList(activeList, activeAlerts, "No active fall alerts", {
+  renderFallAlertList(activeList, activeAlerts, uiText("noActiveFallAlerts"), {
     canResolve: true,
   });
   renderFallAlertList(
     resolvedList,
     resolvedAlerts,
-    "No resolved fall alerts yet",
+    uiText("noResolvedFallAlerts"),
   );
-  appendCompactMore(resolvedList, hiddenResolvedCount, "mục cũ hơn");
+  appendCompactMore(resolvedList, hiddenResolvedCount, uiText("olderItems"));
 }
 
 function setupResolvedFallHistoryToggle() {
@@ -2008,11 +2513,14 @@ function setupResolvedFallHistoryToggle() {
   if (!details || !summary) return;
 
   const updateSummary = () => {
-    summary.textContent = `${details.open ? "▼" : "▶"} Resolved Fall History`;
+    summary.textContent = `${details.open ? "▼" : "▶"} ${uiText("resolvedFallHistory")}`;
   };
 
   updateSummary();
-  details.addEventListener("toggle", updateSummary);
+  if (details.dataset.i18nToggleBound !== "true") {
+    details.dataset.i18nToggleBound = "true";
+    details.addEventListener("toggle", updateSummary);
+  }
 }
 
 function getFirebaseConfig() {
@@ -2129,7 +2637,7 @@ async function notifyChamiForFallAlert(alertId) {
     target: "chami_robot",
     type: "speak",
     status: "pending",
-    message: "Có vẻ như có người bị ngã ở phòng khách. Tôi sẽ kiểm tra ngay.",
+    message: uiText("fallCheckCommandMessage"),
     source: "fall_detection",
     alertId,
     createdAt: firebase.firestore.FieldValue.serverTimestamp(),
@@ -2175,8 +2683,10 @@ function renderAlerts(alerts) {
   el.innerHTML = "";
 
   if (!alerts || alerts.length === 0) {
-    el.innerHTML =
-      '<div style="padding: 12px; color: #6b7280; text-align: center; font-size: 0.9rem;">No alerts</div>';
+    const empty = document.createElement("div");
+    empty.className = "empty-state compact-empty";
+    empty.textContent = uiText("noAlerts");
+    el.appendChild(empty);
     return;
   }
 
@@ -2187,7 +2697,7 @@ function renderAlerts(alerts) {
     row.innerHTML = `
       <div class="left">
         <strong>${getAlertTypeLabel(a.type)}</strong>
-        <small>${a.message || ""}</small>
+        <small>${getAlertMessageDisplay(a)}</small>
 
         <div class="alert-meta">
           <span>${formatDateTime(a.createdAt)}</span>
@@ -2209,8 +2719,10 @@ renderAlerts = function (alerts) {
   const data = alerts || [];
 
   if (data.length === 0) {
-    el.innerHTML =
-      '<div style="padding: 12px; color: #6b7280; text-align: center; font-size: 0.9rem;">No alerts</div>';
+    const empty = document.createElement("div");
+    empty.className = "empty-state compact-empty";
+    empty.textContent = uiText("noAlerts");
+    el.appendChild(empty);
     return;
   }
 
@@ -2246,13 +2758,16 @@ renderAlerts = function (alerts) {
 
     const medicineDetail =
       a.type === "medicine_taken"
-        ? [a.medicineName, a.attempt ? `lần ${a.attempt}` : ""]
+        ? [
+            getDisplayMedicineName(a.medicineName),
+            a.attempt ? `${uiText("attempt")} ${a.attempt}` : "",
+          ]
             .filter(Boolean)
             .join(" • ")
         : a.type === "medicine_no_response"
           ? [
-              a.medicineName,
-              a.attempts ? `${a.attempts} lần nhắc` : "",
+              getDisplayMedicineName(a.medicineName),
+              a.attempts ? `${a.attempts} ${uiText("afterAttempts")}` : "",
             ]
               .filter(Boolean)
               .join(" • ")
@@ -2268,7 +2783,7 @@ renderAlerts = function (alerts) {
     row.innerHTML = `
       <div class="left">
         <strong>${getAlertTypeLabel(a.type)}</strong>
-        <small>${a.message || ""}</small>
+        <small>${getAlertMessageDisplay(a)}</small>
 
         <div class="alert-meta">
           ${meta.map((item) => `<span>${item}</span>`).join("<span>/</span>")}
@@ -2279,7 +2794,7 @@ renderAlerts = function (alerts) {
     el.appendChild(row);
   });
 
-  appendCompactMore(el, hiddenCount, "cảnh báo khác");
+  appendCompactMore(el, hiddenCount, uiText("otherAlerts"));
 };
 
 function renderCareLogs(logs) {
@@ -2297,8 +2812,10 @@ function renderCareLogs(logs) {
   const hiddenCount = Math.max(validLogs.length - visibleLogs.length, 0);
 
   if (visibleLogs.length === 0) {
-    el.innerHTML =
-      '<div style="padding: 12px; color: #6b7280; text-align: center; font-size: 0.9rem;">Chưa có hoạt động mới</div>';
+    const empty = document.createElement("div");
+    empty.className = "empty-state compact-empty";
+    empty.textContent = uiText("noRecentActivity");
+    el.appendChild(empty);
     return;
   }
 
@@ -2316,7 +2833,7 @@ function renderCareLogs(logs) {
     const heading = document.createElement("div");
     heading.className = "care-item-heading";
     const title = document.createElement("strong");
-    title.textContent = presentation?.title || l.type;
+    title.textContent = presentation?.title || getAlertTypeLabel(l.type);
     heading.appendChild(title);
 
     if (presentation) {
@@ -2334,87 +2851,284 @@ function renderCareLogs(logs) {
 
     const detail = document.createElement("small");
     detail.className = "timeline-time";
-    detail.textContent = presentation?.detail || l.message || l.status || "";
+    detail.textContent =
+      presentation?.detail ||
+      getSystemMessageDisplay(l) ||
+      (l.status ? translateStatus(l.status) : "") ||
+      "";
     content.append(heading, detail);
     item.append(dot, content);
     el.appendChild(item);
   });
 
-  appendCompactMore(el, hiddenCount, "hoạt động cũ hơn");
+  appendCompactMore(el, hiddenCount, uiText("olderActivities"));
 }
 
-// Commands UI
+// Command toast notifications
 function getCommandTitle(command) {
   return command?.command || command?.type || command?.action || "unknown";
 }
 
-function getCommandDetail(command) {
-  if (command?.device && command?.action) {
-    return `${command.device} / ${command.action}`;
+function normalizeCommandStatus(status) {
+  const normalized = String(status || "pending").toLowerCase();
+  if (normalized === "done") return "completed";
+  if (
+    ["pending", "processing", "completed", "failed", "cancelled", "warning"].includes(
+      normalized,
+    )
+  ) {
+    return normalized;
   }
 
-  if (command?.target && command?.action) {
-    return `${command.target} / ${command.action}`;
+  return "pending";
+}
+
+function getCommandToastTitleKey(status) {
+  const keys = {
+    pending: "commandSent",
+    processing: "commandProcessing",
+    completed: "commandCompleted",
+    failed: "commandFailed",
+    cancelled: "commandCancelled",
+    warning: "commandSent",
+  };
+
+  return keys[normalizeCommandStatus(status)] || "commandSent";
+}
+
+function getCommandToastIcon(status) {
+  const icons = {
+    pending: "↗",
+    processing: "…",
+    completed: "✓",
+    failed: "!",
+    cancelled: "×",
+    warning: "!",
+  };
+
+  return icons[normalizeCommandStatus(status)] || "↗";
+}
+
+function sanitizeCommandText(value) {
+  return String(value || "")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getCommandToastDescription(command = {}) {
+  const key = command.key || command.commandKey || "";
+  const type = command.type || command.command || "";
+  const action = command.action || "";
+  const target = command.target || command.targetId || command.device || "";
+
+  if (
+    key === "room_light_power" ||
+    command.command === "living_room_light" ||
+    target === LIGHT_DEVICE_ID ||
+    target === LEGACY_LIGHT_DEVICE_ID ||
+    target === "living_room_light"
+  ) {
+    return uiText("commandDescriptionLightToggle");
   }
 
+  if (key === "ac_cool_26" || command.command === "air_conditioner_on") {
+    return uiText("commandDescriptionAirconOn");
+  }
+
+  if (key === "ac_off" || command.command === "air_conditioner_off") {
+    return uiText("commandDescriptionAirconOff");
+  }
+
+  if (command.command === "fan_toggle" || target === "fan01" || target === "fan") {
+    return uiText("commandDescriptionFanToggle");
+  }
+
+  if (action === "remind_medicine" || type === "remind_medicine") {
+    const medicineName = getDisplayMedicineName(command.medicineName);
+    return medicineName
+      ? `${uiText("medicineReminder")} · ${medicineName}`
+      : uiText("medicineReminder");
+  }
+
+  const fallback = sanitizeCommandText(
+    command.label || type || action || command.command || target,
+  );
+  return fallback || uiText("commandDescriptionFallback");
+}
+
+function getCommandToastId(command = {}) {
   return (
-    command?.targetId ||
-    command?.device ||
-    command?.target ||
-    command?.text ||
-    ""
+    command.id ||
+    command.commandId ||
+    command.localToastId ||
+    command.createdAt ||
+    command.updatedAt ||
+    `${getCommandTitle(command)}:${command.targetId || command.target || ""}`
   );
 }
 
-function renderCommands(cmds) {
-  const el = document.getElementById("commands-list");
-  el.innerHTML = "";
-  const pendingCommands = sortByNewest(
-    (cmds || []).filter((command) => (command.status || "pending") === "pending"),
-    (command) => getTimeValue(command.createdAt),
-  );
-  const visibleCommands = pendingCommands.slice(0, PENDING_COMMAND_DISPLAY_LIMIT);
-  const hiddenCount = Math.max(pendingCommands.length - visibleCommands.length, 0);
+function getCommandToastFingerprint(command, status) {
+  return `${status}:${getCommandToastDescription(command)}`;
+}
 
-  if (visibleCommands.length === 0) {
-    el.innerHTML =
-      '<div style="padding: 12px; color: #6b7280; text-align: center; font-size: 0.9rem;">No pending commands</div>';
+function rememberCommandToastFingerprint(fingerprint) {
+  const now = Date.now();
+  commandToastRecentFingerprints.set(fingerprint, now);
+  for (const [key, timestamp] of commandToastRecentFingerprints.entries()) {
+    if (now - timestamp > 8000) {
+      commandToastRecentFingerprints.delete(key);
+    }
+  }
+}
+
+function removeCommandToast(toastId) {
+  const index = activeCommandToasts.findIndex((item) => item.toastId === toastId);
+  if (index === -1) return;
+
+  const [toast] = activeCommandToasts.splice(index, 1);
+  window.clearTimeout(toast.timeoutId);
+  toast.node.remove();
+}
+
+function renderCommandToastNode(toast) {
+  const status = normalizeCommandStatus(toast.status);
+  toast.node.className = `toast-card is-${status}`;
+  toast.node.style.setProperty("--toast-duration", `${toast.durationMs}ms`);
+  toast.node.setAttribute("role", status === "failed" ? "alert" : "status");
+
+  const title = uiText(getCommandToastTitleKey(status));
+  const description = getCommandToastDescription(toast.command);
+  const badge = translateStatus(status);
+
+  const icon = document.createElement("span");
+  icon.className = "toast-icon";
+  icon.setAttribute("aria-hidden", "true");
+  icon.textContent = getCommandToastIcon(status);
+
+  const content = document.createElement("div");
+  content.className = "toast-content";
+  const titleEl = document.createElement("strong");
+  titleEl.className = "toast-title";
+  titleEl.textContent = title;
+  const descriptionEl = document.createElement("span");
+  descriptionEl.className = "toast-description";
+  descriptionEl.textContent = description;
+  content.append(titleEl, descriptionEl);
+
+  const badgeEl = document.createElement("span");
+  badgeEl.className = "toast-badge";
+  badgeEl.textContent = badge;
+
+  const close = document.createElement("button");
+  close.className = "toast-close";
+  close.type = "button";
+  close.setAttribute("aria-label", uiText("closeNotification"));
+  close.textContent = "×";
+  close.addEventListener("click", () => removeCommandToast(toast.toastId));
+
+  const progress = document.createElement("span");
+  progress.className = "toast-progress";
+  progress.setAttribute("aria-hidden", "true");
+
+  toast.node.replaceChildren(icon, content, badgeEl, close, progress);
+}
+
+function showCommandToast(command = {}, options = {}) {
+  const toastCommand =
+    command.id || command.commandId || command.createdAt || command.updatedAt
+      ? command
+      : { ...command, localToastId: `local:${Date.now()}:${Math.random()}` };
+  const status = normalizeCommandStatus(options.status || toastCommand.status);
+  const commandId = getCommandToastId(toastCommand);
+  const seenKey = `${commandId}:${status}`;
+  const fingerprint = getCommandToastFingerprint(toastCommand, status);
+  const shouldDedupe = options.dedupe !== false;
+
+  if (shouldDedupe && commandToastSeen.has(seenKey)) return;
+  if (
+    shouldDedupe &&
+    commandToastRecentFingerprints.has(fingerprint) &&
+    !options.force
+  ) {
+    commandToastSeen.add(seenKey);
     return;
   }
-  visibleCommands.forEach((c) => {
-    const row = document.createElement("div");
-    row.className = "commands-item";
-    const status = c.status || "pending";
-    const statusClass =
-      status === "completed" || status === "done"
-        ? "cmd-completed"
-        : status === "failed"
-          ? "cmd-failed"
-          : "cmd-pending";
-    row.innerHTML = `
-      <div>
-        <strong>${getCommandTitle(c)}</strong>
-        <small>${getCommandDetail(c)}</small>
-      </div>
-      <span class="cmd-status ${statusClass}">${status.toUpperCase()}</span>
-    `;
-    el.appendChild(row);
-  });
 
-  appendCompactMore(el, hiddenCount, "lệnh chờ khác");
+  commandToastSeen.add(seenKey);
+  rememberCommandToastFingerprint(fingerprint);
+
+  const container = document.getElementById("toast-container");
+  if (!container) return;
+
+  while (activeCommandToasts.length >= COMMAND_TOAST_MAX_VISIBLE) {
+    removeCommandToast(activeCommandToasts[0].toastId);
+  }
+
+  const durationMs =
+    options.durationMs ||
+    COMMAND_TOAST_DURATIONS_MS[status] ||
+    COMMAND_TOAST_DEFAULT_DURATION_MS;
+  const node = document.createElement("article");
+  const toast = {
+    toastId: `${seenKey}:${Date.now()}`,
+    command: toastCommand,
+    status,
+    durationMs,
+    node,
+    timeoutId: 0,
+  };
+
+  renderCommandToastNode(toast);
+  container.prepend(node);
+  toast.timeoutId = window.setTimeout(
+    () => removeCommandToast(toast.toastId),
+    durationMs,
+  );
+  activeCommandToasts.push(toast);
 }
 
-document
-  .getElementById("btn-refresh-commands")
-  ?.addEventListener("click", async () => {
-    const cmds = await FirebaseService.listCommands();
-    renderCommands(cmds);
-  });
+function handleCommandToastSnapshot(commands) {
+  const statusesToShow = new Set([
+    "pending",
+    "processing",
+    "completed",
+    "failed",
+    "cancelled",
+    "warning",
+  ]);
+  const data = sortByNewest(commands || [], (command) =>
+    getTimeValue(command.updatedAt || command.createdAt),
+  );
+
+  if (!commandToastListenerPrimed) {
+    data.forEach((command) => {
+      const status = normalizeCommandStatus(command.status);
+      commandToastSeen.add(`${getCommandToastId(command)}:${status}`);
+    });
+    commandToastListenerPrimed = true;
+    return;
+  }
+
+  data
+    .slice()
+    .reverse()
+    .forEach((command) => {
+      const status = normalizeCommandStatus(command.status);
+      if (statusesToShow.has(status)) {
+        showCommandToast(command, { status });
+      }
+    });
+}
+
+function rerenderCommandToasts() {
+  activeCommandToasts.forEach(renderCommandToastNode);
+}
 
 async function createDemoMedicineEvent(type) {
   const linkedReminder =
     latestMedicineReminders.length === 1 ? latestMedicineReminders[0] : null;
-  const medicineName = linkedReminder?.medicineName || "Thuốc";
+  const medicineName = linkedReminder?.medicineName || "";
   const createdAt = new Date().toISOString();
   const confirmed = type === "medicine_taken";
   const event = {
@@ -2427,9 +3141,10 @@ async function createDemoMedicineEvent(type) {
     attempts: confirmed ? null : 3,
     medicineName,
     ...(linkedReminder?.id ? { reminderId: linkedReminder.id } : {}),
+    messageKey: confirmed ? "medicineTaken" : "noResponseAfterThreeReminders",
     message: confirmed
-      ? "Người dùng đã xác nhận uống thuốc"
-      : "Không có phản hồi sau 3 lần nhắc uống thuốc",
+      ? uiText("medicineTaken")
+      : uiText("noResponseAfterThreeReminders"),
     createdAt,
   };
 
@@ -2450,7 +3165,8 @@ document.getElementById("btn-ate").onclick = async () => {
     userId: "user01",
     type: "meal",
     status: "done",
-    message: "Đã ăn sáng",
+    messageKey: "ateMeal",
+    message: uiText("ateMeal"),
     source: "web_dashboard",
   });
 };
@@ -2459,7 +3175,8 @@ document.getElementById("btn-no-response").onclick = async () => {
     userId: "user01",
     type: "response",
     status: "no_response",
-    message: "Không phản hồi",
+    messageKey: "noResponse",
+    message: uiText("noResponse"),
     source: "web_dashboard",
   });
 };
@@ -2468,7 +3185,8 @@ document.getElementById("btn-sim-fall").onclick = async () => {
   await FirebaseService.createAlert({
     type: "fall_detected",
     level: "emergency",
-    message: "Phát hiện ngã tại phòng khách",
+    messageKey: "fallDetectedLivingRoom",
+    message: uiText("fallDetectedLivingRoom"),
     source: "camera_ai",
     lineStatus: "sent",
     createdAt: new Date().toISOString(),
@@ -2478,7 +3196,8 @@ document.getElementById("btn-sim-robot-offline").onclick = async () => {
   await FirebaseService.createAlert({
     type: "robot_offline",
     level: "warning",
-    message: "Robot Chami mất kết nối",
+    messageKey: "robotDisconnected",
+    message: uiText("robotDisconnected"),
     source: "robot_chami",
     lineStatus: "sent",
     createdAt: new Date().toISOString(),
@@ -2503,7 +3222,8 @@ document.getElementById("demo-fall").onclick = async () => {
   await FirebaseService.createAlert({
     type: "fall_detected",
     level: "emergency",
-    message: "Phát hiện ngã (demo)",
+    messageKey: "fallDetected",
+    message: uiText("fallDetected"),
     source: "demo",
   });
 };
@@ -2519,12 +3239,23 @@ document.getElementById("demo-toggle-light").onclick = async () => {
     button.disabled = true;
   }
   try {
-    await createLightControlCommand();
+    const payload = await createLightControlCommand();
     toggleLocalLightDisplayState();
-    alert("Đã gửi lệnh tới IR Hub");
+    showCommandToast({
+      ...payload,
+      key: "room_light_power",
+      type: "ir_send",
+      status: "pending",
+    });
   } catch (error) {
-    console.error("Không gửi được lệnh", error);
-    alert("Không gửi được lệnh");
+    console.error("Dashboard: command send failed", error);
+    showCommandToast(
+      {
+        command: "living_room_light",
+        status: "failed",
+      },
+      { status: "failed", dedupe: false },
+    );
   } finally {
     if (button) {
       button.disabled = false;
@@ -2574,7 +3305,7 @@ if (typeof FirebaseService.listenMedicineCareLogs === "function") {
       `Dashboard: medicine care logs loaded count=${latestMedicineCareLogs.length}`,
     );
     renderLatestMedicineFollowup();
-  }, 50);
+  }, 30);
 }
 
 if (typeof FirebaseService.listenCaregiverNotifications === "function") {
@@ -2586,8 +3317,27 @@ if (typeof FirebaseService.listenCaregiverNotifications === "function") {
 if (typeof FirebaseService.listenHealthConcerns === "function") {
   FirebaseService.listenHealthConcerns((data) => {
     updateHealthConcernsSection(data || []);
-  }, 20);
+  }, 30);
 }
+
+window.addEventListener("tsunagari-language-change", () => {
+  window.TsunagariI18n?.applyTranslations?.();
+  updateDateTimeEnvironmentClock();
+  renderRoomEnvironment();
+  renderOutdoorWeather();
+  renderHealthConcerns(latestHealthConcerns);
+  renderLatestMedicineFollowup();
+  renderMedicineReminders(latestMedicineReminders);
+  updateRobotSection(pickRobotForDisplay());
+  renderDevices(latestSmartHomeDevices);
+  updateCaregiverNotificationsSection(latestCaregiverNotifications);
+  updateAlertsSection(latestAlerts);
+  updateCareLogsSection(latestCareLogs);
+  updateFallResponseTimelineFromCareEvents();
+  renderFallAlerts(latestFallAlerts);
+  rerenderCommandToasts();
+  setupResolvedFallHistoryToggle();
+});
 
 if (typeof FirebaseService.subscribeToCareEvents === "function") {
   FirebaseService.subscribeToCareEvents((data) => {
@@ -2605,7 +3355,7 @@ if (typeof FirebaseService.subscribeToCareEvents === "function") {
 if (typeof FirebaseService.subscribeToCommands === "function") {
   FirebaseService.subscribeToCommands((data) => {
     const commands = data || [];
-    renderCommands(commands);
+    handleCommandToastSnapshot(commands);
   });
 }
 
@@ -2618,6 +3368,7 @@ setInterval(
 
 setupResolvedFallHistoryToggle();
 bindMedicineReminderDashboard();
+startEnvironmentWidget();
 subscribeToCameraDeviceStatus();
 subscribeToFallAlerts();
 

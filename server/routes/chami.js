@@ -7,6 +7,7 @@ const {
   notifyCaregiversForEvent,
   notifyCaregiversForEventAsync,
 } = require("../lib/caregiverNotificationService");
+const { schedulePruneCollections } = require("../lib/rtdbRetentionService");
 
 const router = express.Router();
 const MEDICINE_EVENT_TYPES = new Set([
@@ -53,6 +54,20 @@ const HEALTH_SYMPTOMS = new Set([
   "pain_general",
   "direct_help",
 ]);
+const HISTORY_RETENTION_PATHS = [
+  "alerts",
+  "health_concerns",
+  "care_logs",
+  "care_events",
+  "caregiver_notifications",
+];
+
+function scheduleHistoryPrune(db, paths) {
+  schedulePruneCollections({
+    db,
+    paths,
+  });
+}
 
 function cleanString(value, maxLength, fallback = "") {
   if (typeof value !== "string") return fallback;
@@ -265,6 +280,7 @@ async function normalizeMedicineEvent(body, db) {
 
   const source = cleanString(body.source, 64, "chami_001");
   const dedupeCreatedAt = parsedCreatedAt ?? Date.now();
+  const createdAtMs = Date.now();
   const createdAt = parsedCreatedAt ?? getServerTimestamp();
   const medicineName = await resolveMedicineName(
     db,
@@ -293,6 +309,7 @@ async function normalizeMedicineEvent(body, db) {
           "Người dùng đã xác nhận uống thuốc",
         ),
         createdAt,
+        createdAtMs,
       },
       eventId,
       timestampWasSupplied: parsedCreatedAt !== null,
@@ -319,6 +336,7 @@ async function normalizeMedicineEvent(body, db) {
         "Không có phản hồi sau 3 lần nhắc uống thuốc",
       ),
       createdAt,
+      createdAtMs,
     },
     eventId,
     timestampWasSupplied: parsedCreatedAt !== null,
@@ -450,11 +468,13 @@ async function writeHealthConcern(req, res) {
 
     const alertRef = db.ref("alerts").push();
     const healthConcernRef = db.ref("health_concerns").push();
+    const createdAtMs = Date.now();
     const now = getServerTimestamp();
     const healthConcern = {
       id: healthConcernRef.key,
       ...event,
       createdAt: now,
+      createdAtMs,
       receivedAt: now,
       resolved: false,
       source: "robot_conversation",
@@ -472,6 +492,7 @@ async function writeHealthConcern(req, res) {
       eventId: event.eventId,
       healthConcernId: healthConcernRef.key,
       createdAt: now,
+      createdAtMs,
       receivedAt: now,
     };
 
@@ -479,6 +500,7 @@ async function writeHealthConcern(req, res) {
       [`alerts/${alertRef.key}`]: alert,
       [`health_concerns/${healthConcernRef.key}`]: healthConcern,
     });
+    scheduleHistoryPrune(db, HISTORY_RETENTION_PATHS);
 
     let lineNotification = {
       eligible: false,
@@ -631,16 +653,19 @@ async function writeMedicineFollowup(req, res) {
 
     const alertRef = db.ref("alerts").push();
     const careLogRef = db.ref("care_logs").push();
+    const createdAtMs = Date.now();
     const receivedAt = getServerTimestamp();
     const alert = {
       id: alertRef.key,
       ...event,
+      createdAtMs,
       receivedAt,
     };
     delete alert.category;
     const careLog = {
       id: careLogRef.key,
       ...event,
+      createdAtMs,
       receivedAt,
     };
 
@@ -648,6 +673,7 @@ async function writeMedicineFollowup(req, res) {
       [`alerts/${alertRef.key}`]: alert,
       [`care_logs/${careLogRef.key}`]: careLog,
     });
+    scheduleHistoryPrune(db, HISTORY_RETENTION_PATHS);
 
     console.log(`[MedicineFollowup] alert created id=${alertRef.key}`);
     console.log(`[MedicineFollowup] care log created id=${careLogRef.key}`);
@@ -800,6 +826,7 @@ router.post("/alert", deviceAuth, async (req, res) => {
           ? "danger"
           : normalizedType;
     const dedupeCreatedAt = parsedCreatedAt ?? Date.now();
+    const createdAtMs = Date.now();
     const dedupeKey = buildAlertDedupeKey(
       { ...normalizedEvent, type: notificationType },
       eventId,
@@ -810,7 +837,9 @@ router.post("/alert", deviceAuth, async (req, res) => {
     await alertRef.set({
       id: alertRef.key,
       ...normalizedEvent,
+      createdAtMs,
     });
+    scheduleHistoryPrune(db, HISTORY_RETENTION_PATHS);
 
     notifyCaregiversForEventAsync({
       ...normalizedEvent,

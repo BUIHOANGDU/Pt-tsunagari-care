@@ -1,4 +1,5 @@
 const { getDb, getServerTimestamp } = require("../firebaseAdmin");
+const { schedulePruneCollection } = require("./rtdbRetentionService");
 
 const DEFAULT_TIMEZONE = "Asia/Tokyo";
 const DEFAULT_TARGET_DEVICE_ID = "chami_001";
@@ -22,6 +23,13 @@ function log(message) {
 function logError(message, error) {
   const detail = error instanceof Error ? error.message : String(error);
   console.error(`${LOG_PREFIX} ${message}: ${detail}`);
+}
+
+function scheduleCareLogRetention(db) {
+  schedulePruneCollection({
+    db,
+    path: "care_logs",
+  });
 }
 
 function getSafeLogText(value, fallback = "") {
@@ -210,6 +218,7 @@ function buildCareLog(careLogRef, reminderId, reminder) {
     status: "sent",
     message: "Đã gửi lời nhắc uống thuốc",
     createdAt: getServerTimestamp(),
+    createdAtMs: Date.now(),
   };
 }
 
@@ -303,6 +312,7 @@ async function processDueReminder(reminderId, reminder, occurrence) {
       [`commands/${commandRef.key}`]: command,
       [`care_logs/${careLogRef.key}`]: careLog,
     });
+    scheduleCareLogRetention(db);
     log(`trigger timestamps updated id=${reminderId}`);
     log(
       `command created reminderId=${reminderId} commandId=${commandRef.key}`,

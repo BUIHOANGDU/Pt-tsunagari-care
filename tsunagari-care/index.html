@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="vi">
+<html lang="ja">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -9,11 +9,11 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
       rel="stylesheet"
     />
-    <title>TsunagariCare | Care Operations Dashboard</title>
+    <title>TsunagariCare | ケア管理ダッシュボード</title>
     <link rel="stylesheet" href="src/css/style.css" />
   </head>
   <body>
-    <a href="#main-content" class="skip-link">Bỏ qua tới nội dung</a>
+    <a href="#main-content" class="skip-link" data-i18n="skipLink">メインコンテンツへ移動</a>
 
     <header class="topbar">
       <div class="topbar-inner">
@@ -33,13 +33,23 @@
           </span>
           <span>
             <strong>TsunagariCare</strong>
-            <small>Remote care operations</small>
+            <small data-i18n="brandSubtitle">遠隔ケア運用</small>
           </span>
         </a>
 
-        <nav class="top-actions" aria-label="Trạng thái hệ thống">
-          <span class="status-pill status-online">Live demo</span>
-          <span id="user-badge">Care team</span>
+        <nav class="top-actions" aria-label="システム状態" data-i18n-aria-label="systemStatusLabel">
+          <span class="status-pill status-online" data-i18n="liveDemo">Live demo</span>
+          <span id="user-badge" data-i18n="careTeam">Care team</span>
+          <div
+            class="language-switcher"
+            role="group"
+            aria-label="表示言語"
+            data-i18n-aria-label="languageSwitcherLabel"
+          >
+            <button type="button" data-language-option="ja">日本語</button>
+            <span aria-hidden="true">|</span>
+            <button type="button" data-language-option="vi">Tiếng Việt</button>
+          </div>
         </nav>
       </div>
     </header>
@@ -47,63 +57,108 @@
     <main id="main-content" class="container">
       <section class="hero-section" aria-labelledby="page-title">
         <div class="hero-copy">
-          <p class="eyebrow">Dashboard chăm sóc người cao tuổi</p>
-          <h1 id="page-title">Theo dõi robot, thiết bị và cảnh báo theo thời gian thực.</h1>
+          <p class="eyebrow" data-i18n="dashboardEyebrow">高齢者ケアダッシュボード</p>
+          <h1 id="page-title" data-i18n="dashboardTitle">ロボット、デバイス、アラートをリアルタイムに見守ります。</h1>
           <p>
-            Một màn hình vận hành tập trung cho gia đình và đội chăm sóc: rõ trạng thái,
-            dễ phản hồi, đủ tin cậy để demo thương mại.
+            <span data-i18n="dashboardSubtitle">家族とケアチームのための運用画面です。状態を把握しやすく、すぐに対応できます。</span>
           </p>
         </div>
 
-        <div class="hero-live-panel" aria-label="Tóm tắt vận hành">
+        <div class="hero-live-panel" aria-label="運用サマリー" data-i18n-aria-label="livePanelLabel">
           <div class="live-panel-top">
             <span class="live-dot"></span>
-            <span>Care room live</span>
+            <span data-i18n="careRoomLive">ケアルーム稼働中</span>
           </div>
           <div class="live-metrics">
             <div>
-              <small>Response</small>
+              <small data-i18n="response">応答</small>
               <strong>1m 42s</strong>
             </div>
             <div>
-              <small>Uptime</small>
+              <small data-i18n="uptime">稼働率</small>
               <strong>99.8%</strong>
             </div>
           </div>
           <div class="care-line">
             <span></span>
             <div>
-              <strong>Chami đã xác nhận hiện diện</strong>
-              <small>Phòng khách · vừa cập nhật</small>
+              <strong data-i18n="chamiPresence">Chamiが在室を確認しました</strong>
+              <small data-i18n="livingRoomUpdated">リビング・更新済み</small>
             </div>
           </div>
-          <div class="hero-actions" aria-label="Thao tác nhanh">
-            <a class="btn primary" href="#alerts-card">Xem cảnh báo</a>
-            <a class="btn secondary" href="#devices-card">Quản lý thiết bị</a>
+          <div class="hero-actions" aria-label="クイック操作" data-i18n-aria-label="quickActionsLabel">
+            <a class="btn primary" href="#alerts-card" data-i18n="viewAlerts">アラートを見る</a>
+            <a class="btn secondary" href="#devices-card" data-i18n="manageDevices">デバイス管理</a>
           </div>
         </div>
       </section>
 
-      <section class="signal-strip" aria-label="Tín hiệu vận hành">
-        <span>LINE Notify sẵn sàng</span>
-        <span>Firebase realtime</span>
-        <span>Robot Chami online</span>
-        <span>Smart home linked</span>
+      <section class="signal-strip" aria-label="運用シグナル" data-i18n-aria-label="signalStripLabel">
+        <span data-i18n="lineReady">LINE通知準備完了</span>
+        <span data-i18n="firebaseRealtime">Firebase realtime</span>
+        <span data-i18n="chamiOnline">Robot Chami online</span>
+        <span data-i18n="smartHomeLinked">Smart home linked</span>
       </section>
 
-      <section class="overview-stats" aria-label="Tổng quan nhanh">
+      <section
+        class="environment-strip"
+        aria-label="日付・時刻・環境"
+        data-i18n-aria-label="dateTimeEnvironment"
+      >
+        <article class="environment-tile">
+          <span class="environment-icon" aria-hidden="true">📅</span>
+          <div>
+            <p class="environment-label" data-i18n="currentDate">日付</p>
+            <p class="environment-value" id="current-date-text">--</p>
+          </div>
+        </article>
+        <article class="environment-tile">
+          <span class="environment-icon" aria-hidden="true">🕒</span>
+          <div>
+            <p class="environment-label" data-i18n="currentTime">現在時刻</p>
+            <p class="environment-value" id="current-time-text">--:--:--</p>
+          </div>
+        </article>
+        <article class="environment-tile" id="outdoor-weather-tile">
+          <span
+            class="environment-icon"
+            id="outdoor-weather-icon"
+            role="img"
+            aria-label="天気情報を取得中"
+            data-i18n-aria-label="weatherLoading"
+          >☀️</span>
+          <div>
+            <p class="environment-label" data-i18n="outdoorTemperature">外気温</p>
+            <p class="environment-value" id="outdoor-temperature-text">--°C</p>
+            <p class="environment-detail" id="outdoor-weather-detail" data-i18n="weatherLoading">天気情報を取得中</p>
+          </div>
+        </article>
+        <article class="environment-tile">
+          <span class="environment-icon" aria-hidden="true">🏠</span>
+          <div>
+            <p class="environment-label" data-i18n="roomTemperature">室温</p>
+            <p class="environment-value" id="room-temperature-text">25°C</p>
+            <p class="environment-detail">
+              <span id="room-humidity-text">湿度 50%</span>
+              <span class="environment-badge" id="room-demo-badge" data-i18n="demo">デモ</span>
+            </p>
+          </div>
+        </article>
+      </section>
+
+      <section class="overview-stats" aria-label="クイック概要" data-i18n-aria-label="overviewLabel">
         <article class="stat-card stat-primary">
           <span class="stat-icon robot-icon" aria-hidden="true"></span>
           <div class="stat-content">
             <p class="stat-label">Robot</p>
-            <p class="stat-value" id="robot-status-text">Đang tải</p>
+            <p class="stat-value" id="robot-status-text" data-i18n="loading">読み込み中</p>
           </div>
         </article>
 
         <article class="stat-card stat-blue">
           <span class="stat-icon battery-icon" aria-hidden="true"></span>
           <div class="stat-content">
-            <p class="stat-label">Pin</p>
+            <p class="stat-label" data-i18n="battery">バッテリー</p>
             <p class="stat-value" id="robot-battery-text">--</p>
           </div>
         </article>
@@ -111,7 +166,7 @@
         <article class="stat-card stat-neutral">
           <span class="stat-icon devices-icon" aria-hidden="true"></span>
           <div class="stat-content">
-            <p class="stat-label">Thiết bị</p>
+            <p class="stat-label" data-i18n="devices">デバイス</p>
             <p class="stat-value" id="devices-count">0</p>
           </div>
         </article>
@@ -119,15 +174,15 @@
         <article class="stat-card stat-success">
           <span class="stat-icon health-icon" aria-hidden="true"></span>
           <div class="stat-content">
-            <p class="stat-label">Sức khỏe</p>
-            <p class="stat-value" id="user-state-text">Ổn định</p>
+            <p class="stat-label" data-i18n="health">健康</p>
+            <p class="stat-value" id="user-state-text" data-i18n="stable">安定</p>
           </div>
         </article>
 
         <article class="stat-card stat-danger">
           <span class="stat-icon alert-icon" aria-hidden="true"></span>
           <div class="stat-content">
-            <p class="stat-label">Cảnh báo</p>
+            <p class="stat-label" data-i18n="alerts">アラート</p>
             <p class="stat-value" id="alerts-count">0</p>
           </div>
         </article>
@@ -138,10 +193,10 @@
           <section class="panel-card robot-profile-card" aria-labelledby="robot-title">
             <div class="section-heading">
               <div>
-                <p class="section-kicker">Robot chăm sóc</p>
-                <h2 id="robot-title">Chami Assistant</h2>
+                <p class="section-kicker" data-i18n="careRobot">ケアロボット</p>
+                <h2 id="robot-title" data-i18n="chamiAssistant">Chamiアシスタント</h2>
               </div>
-              <span class="availability-dot" aria-label="Đang hoạt động"></span>
+              <span class="availability-dot" aria-label="稼働中" data-i18n-aria-label="activeLabel"></span>
             </div>
 
             <div class="robot-visual" aria-hidden="true">
@@ -151,15 +206,15 @@
 
             <div class="robot-stats-compact">
               <div class="stat-mini">
-                <span class="label">Pin</span>
+                <span class="label" data-i18n="battery">バッテリー</span>
                 <strong id="robot-battery-display">--</strong>
               </div>
               <div class="stat-mini">
-                <span class="label">Trạng thái</span>
-                <strong id="robot-status-display">Đang tải</strong>
+                <span class="label" data-i18n="status">状態</span>
+                <strong id="robot-status-display" data-i18n="loading">読み込み中</strong>
               </div>
               <div class="stat-mini">
-                <span class="label">Kết nối</span>
+                <span class="label" data-i18n="connection">接続</span>
                 <strong id="devices-display">0</strong>
               </div>
             </div>
@@ -168,14 +223,14 @@
           <section class="panel-card alert-card" id="alerts-card" aria-labelledby="alerts-title">
             <div class="section-heading">
               <div>
-                <p class="section-kicker">Ưu tiên cao</p>
-                <h2 id="alerts-title">Trung tâm cảnh báo</h2>
+                <p class="section-kicker" data-i18n="highPriority">高優先度</p>
+                <h2 id="alerts-title" data-i18n="alertCenter">アラートセンター</h2>
               </div>
             </div>
             <div id="alerts-list" class="alerts-compact"></div>
             <div class="btn-row">
-              <button id="btn-sim-fall" class="danger">Tạo cảnh báo ngã</button>
-              <button id="btn-sim-robot-offline">Robot mất kết nối</button>
+              <button id="btn-sim-fall" class="danger" data-i18n="createFallAlert">転倒アラートを作成</button>
+              <button id="btn-sim-robot-offline" data-i18n="robotDisconnected">Robot切断</button>
             </div>
           </section>
 
@@ -187,7 +242,7 @@
             <div class="section-heading">
               <div>
                 <p class="section-kicker">LINE Messaging API</p>
-                <h2 id="caregiver-notifications-title">Thông báo người chăm sóc</h2>
+                <h2 id="caregiver-notifications-title" data-i18n="caregiverNotifications">ケア担当者通知</h2>
               </div>
             </div>
             <div
@@ -205,14 +260,14 @@
         >
           <div class="section-heading fall-response-heading">
             <div>
-              <p class="section-kicker">Care operation center</p>
-              <h2 id="fall-response-title">Quy trình xử lý ngã</h2>
+              <p class="section-kicker" data-i18n="careOperationCenter">ケア運用センター</p>
+              <h2 id="fall-response-title" data-i18n="fallResponseFlow">転倒対応フロー</h2>
             </div>
             <span
               id="fall-response-summary"
               class="fall-response-summary is-empty"
             >
-              Chưa có dữ liệu
+              <span data-i18n="noData">データなし</span>
             </span>
           </div>
           <div
@@ -220,10 +275,10 @@
             class="fall-response-timeline"
             aria-live="polite"
           >
-            <div class="empty-state">Chưa có sự kiện ngã gần đây</div>
+            <div class="empty-state" data-i18n="noRecentFallEvents">最近の転倒イベントはありません。</div>
           </div>
           <p id="fall-response-note" class="fall-response-note">
-            Kết quả an toàn chỉ hiển thị khi có care event safe từ Chami.
+            <span data-i18n="fallResponseNote">安全結果はChamiからのcare event safeがある場合だけ表示します。</span>
           </p>
         </section>
 
@@ -234,8 +289,8 @@
         >
           <div class="section-heading">
             <div>
-              <p class="section-kicker">Camera device</p>
-              <h2 id="camera-device-title">Camera Device Status</h2>
+              <p class="section-kicker" data-i18n="cameraDevice">カメラデバイス</p>
+              <h2 id="camera-device-title" data-i18n="cameraDeviceStatus">カメラ状態</h2>
             </div>
             <span
               id="camera-device-status-badge"
@@ -254,8 +309,8 @@
         >
           <div class="section-heading">
             <div>
-              <p class="section-kicker">Camera safety</p>
-              <h2 id="fall-alerts-title">Fall Detection Alerts</h2>
+              <p class="section-kicker" data-i18n="cameraSafety">カメラ安全確認</p>
+              <h2 id="fall-alerts-title" data-i18n="fallDetectionAlerts">転倒検知アラート</h2>
             </div>
             <a
               class="btn secondary"
@@ -263,17 +318,17 @@
               target="_blank"
               rel="noopener"
             >
-              Open Fall Camera
+              <span data-i18n="openFallCamera">転倒カメラを開く</span>
             </a>
           </div>
           <div class="fall-alert-groups">
             <section class="fall-alert-group" aria-labelledby="active-fall-alerts-title">
-              <h3 id="active-fall-alerts-title">Active Fall Alerts</h3>
+              <h3 id="active-fall-alerts-title" data-i18n="activeFallAlerts">対応中の転倒アラート</h3>
               <div id="active-fall-alerts-list" class="fall-alerts-list"></div>
             </section>
 
             <details class="fall-alert-group fall-alert-history">
-              <summary>▶ Resolved Fall History</summary>
+              <summary data-i18n="resolvedFallHistory">対応済み転倒履歴</summary>
               <div id="resolved-fall-alerts-list" class="fall-alerts-list"></div>
             </details>
           </div>
@@ -282,8 +337,8 @@
         <section class="panel-card devices-card" id="devices-card" aria-labelledby="devices-title">
           <div class="section-heading">
             <div>
-              <p class="section-kicker">Nhà thông minh</p>
-              <h2 id="devices-title">Thiết bị đang kết nối</h2>
+              <p class="section-kicker" data-i18n="smartHome">スマートホーム</p>
+              <h2 id="devices-title" data-i18n="connectedDevices">接続中のデバイス</h2>
             </div>
           </div>
           <div id="devices-list" class="devices-compact-grid"></div>
@@ -297,15 +352,15 @@
           >
             <div class="section-heading">
               <div>
-                <p class="section-kicker">Chami reminder</p>
-                <h2 id="medicine-reminder-title">Lịch nhắc uống thuốc</h2>
+                <p class="section-kicker" data-i18n="chamiReminder">服薬リマインダー</p>
+                <h2 id="medicine-reminder-title" data-i18n="medicineReminderSchedule">服薬リマインダー</h2>
               </div>
               <button
                 id="medicine-reminder-add"
                 class="primary medicine-reminder-add"
                 type="button"
               >
-                + Thêm lịch
+                <span data-i18n="addSchedule">+ 予定を追加</span>
               </button>
             </div>
 
@@ -314,7 +369,7 @@
               class="medicine-reminder-list"
               aria-live="polite"
             >
-              <p class="medicine-reminder-empty">Chưa có lịch nhắc thuốc.</p>
+              <p class="medicine-reminder-empty" data-i18n="noMedicineReminders">服薬リマインダーはありません。</p>
             </div>
             <p
               id="medicine-reminder-status"
@@ -330,8 +385,8 @@
           >
             <div class="section-heading">
               <div>
-                <p class="section-kicker">Chami conversation</p>
-                <h2 id="health-conversation-title">健康状態の履歴</h2>
+                <p class="section-kicker" data-i18n="chamiConversation">健康会話</p>
+                <h2 id="health-conversation-title" data-i18n="healthHistory">健康状態の履歴</h2>
               </div>
             </div>
             <div
@@ -339,59 +394,54 @@
               class="health-conversation-list"
               aria-live="polite"
             >
-              <div class="empty-state">健康に関する会話履歴はありません。</div>
+              <div class="empty-state" data-i18n="noHealthHistory">健康に関する履歴はありません。</div>
             </div>
           </section>
 
           <section class="panel-card health-card" id="health-card" aria-labelledby="health-title">
             <div class="section-heading">
               <div>
-                <p class="section-kicker">Nhật ký chăm sóc</p>
-                <h2 id="health-title">Hoạt động gần đây</h2>
+                <p class="section-kicker" data-i18n="careLog">ケアログ</p>
+                <h2 id="health-title" data-i18n="recentActivity">最近の活動</h2>
               </div>
             </div>
             <div id="care-logs" class="timeline-compact"></div>
             <div class="btn-row">
-              <button id="btn-medicine-done">Đã uống thuốc</button>
-              <button id="btn-medicine-missed">Không phản hồi</button>
-              <button id="btn-ate">Đã ăn</button>
-              <button id="btn-no-response">Không phản hồi</button>
+              <button id="btn-medicine-done" data-i18n="medicineTaken">服薬済み</button>
+              <button id="btn-medicine-missed" data-i18n="noResponse">応答なし</button>
+              <button id="btn-ate" data-i18n="ateMeal">食事済み</button>
+              <button id="btn-no-response" data-i18n="noResponse">応答なし</button>
             </div>
           </section>
 
-          <section class="panel-card commands-card" aria-labelledby="commands-title">
-            <div class="section-heading">
-              <div>
-                <p class="section-kicker">Điều khiển</p>
-                <h2 id="commands-title">Hàng đợi lệnh</h2>
-              </div>
-            </div>
-            <div id="commands-list" class="commands-compact"></div>
-            <div class="btn-row">
-              <button id="btn-refresh-commands">Làm mới lệnh</button>
-            </div>
-          </section>
         </div>
 
         <section class="panel-card demo-card" id="demo-card" aria-labelledby="demo-title">
           <div class="section-heading">
             <div>
-              <p class="section-kicker">Demo bán hàng</p>
-              <h2 id="demo-title">Kịch bản trình diễn</h2>
+              <p class="section-kicker" data-i18n="salesDemo">デモ</p>
+              <h2 id="demo-title" data-i18n="demoScenarios">デモシナリオ</h2>
             </div>
           </div>
           <div class="btn-row">
-            <button id="demo-robot-online" class="primary">Robot online</button>
-            <button id="demo-robot-offline">Robot offline</button>
-            <button id="demo-low-battery">Pin yếu</button>
-            <button id="demo-fall" class="danger">Phát hiện ngã</button>
-            <button id="demo-medicine-done">Đã uống thuốc</button>
-            <button id="demo-no-response">Không phản hồi</button>
-            <button id="demo-toggle-light">Bật đèn</button>
+            <button id="demo-robot-online" class="primary" data-i18n="robotOnline">Robot online</button>
+            <button id="demo-robot-offline" data-i18n="robotOffline">Robot offline</button>
+            <button id="demo-low-battery" data-i18n="lowBattery">バッテリー低下</button>
+            <button id="demo-fall" class="danger" data-i18n="fallDetected">転倒検知</button>
+            <button id="demo-medicine-done" data-i18n="medicineTaken">服薬済み</button>
+            <button id="demo-no-response" data-i18n="noResponse">応答なし</button>
+            <button id="demo-toggle-light" data-i18n="turnLightOn">ライトをオン</button>
           </div>
         </section>
       </section>
     </main>
+
+    <div
+      id="toast-container"
+      class="toast-container"
+      aria-live="polite"
+      aria-atomic="true"
+    ></div>
 
     <dialog
       id="medicine-reminder-dialog"
@@ -401,15 +451,17 @@
       <form id="medicine-reminder-form" method="dialog">
         <div class="medicine-dialog-heading">
           <div>
-            <p class="section-kicker">Medication schedule</p>
-            <h2 id="medicine-reminder-dialog-title">Thêm lịch nhắc</h2>
+            <p class="section-kicker" data-i18n="medicationSchedule">服薬スケジュール</p>
+            <h2 id="medicine-reminder-dialog-title" data-i18n="addMedicineReminder">リマインダー追加</h2>
           </div>
           <button
             id="medicine-reminder-dialog-close"
             class="medicine-dialog-close"
             type="button"
-            title="Đóng"
-            aria-label="Đóng"
+            title="閉じる"
+            aria-label="閉じる"
+            data-i18n-title="close"
+            data-i18n-aria-label="close"
           >
             &times;
           </button>
@@ -417,7 +469,7 @@
 
         <div class="medicine-reminder-form">
           <label>
-            <span>Tên thuốc</span>
+            <span data-i18n="medicineName">薬の名前</span>
             <input
               id="medicine-name-input"
               type="text"
@@ -427,23 +479,23 @@
             />
           </label>
           <label>
-            <span>Giờ uống</span>
+            <span data-i18n="medicineTime">服薬時間</span>
             <input id="medicine-time-input" type="time" required />
           </label>
           <div class="medicine-reminder-readonly">
-            <span>Lặp lại</span>
-            <strong>Hằng ngày</strong>
+            <span data-i18n="repeat">繰り返し</span>
+            <strong data-i18n="daily">毎日</strong>
           </div>
           <label class="medicine-reminder-toggle">
             <input id="medicine-enabled-input" type="checkbox" checked />
-            <span>Trạng thái: Bật</span>
+            <span data-i18n="statusOn">状態: オン</span>
           </label>
         </div>
 
         <div class="medicine-dialog-actions">
-          <button id="medicine-reminder-cancel" type="button">Hủy</button>
+          <button id="medicine-reminder-cancel" type="button" data-i18n="cancel">キャンセル</button>
           <button id="medicine-reminder-save" class="primary" type="submit">
-            Lưu
+            <span data-i18n="save">保存</span>
           </button>
         </div>
       </form>
@@ -453,6 +505,7 @@
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
     <script src="src/js/firebase-config.js"></script>
+    <script src="src/js/i18n.js"></script>
     <script src="src/js/firebase-service.js"></script>
     <script src="src/js/dashboard.js"></script>
     <script src="src/js/demo.js"></script>

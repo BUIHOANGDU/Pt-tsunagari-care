@@ -119,10 +119,18 @@ const FirebaseService = (function () {
   function sortByCreatedAtDesc(arr) {
     return arr.sort((a, b) => {
       const ta = normalizeTimestamp(
-        a.createdAt || a.receivedAt || a.updatedAt || a.timestamp,
+        a.createdAtMs ||
+          a.createdAt ||
+          a.receivedAt ||
+          a.updatedAt ||
+          a.timestamp,
       );
       const tb = normalizeTimestamp(
-        b.createdAt || b.receivedAt || b.updatedAt || b.timestamp,
+        b.createdAtMs ||
+          b.createdAt ||
+          b.receivedAt ||
+          b.updatedAt ||
+          b.timestamp,
       );
       return tb - ta;
     });
@@ -195,6 +203,16 @@ const FirebaseService = (function () {
     return snap.exists() ? snap.val() : null;
   }
 
+  async function getLimitedRealtimeCollection(path, limit = 30) {
+    const safeLimit = Math.min(Math.max(Number(limit) || 30, 1), 30);
+    const snapshot = await db
+      .ref(path)
+      .orderByChild("createdAtMs")
+      .limitToLast(safeLimit)
+      .once("value");
+    return objectToArray(snapshot.val());
+  }
+
   async function setRealtimeValue(path, value) {
     await db.ref(path).set(value);
   }
@@ -219,7 +237,16 @@ const FirebaseService = (function () {
     listeners[collection].push(cb);
 
     if (useRealtime && !unsubscribes[collection]) {
-      const ref = db.ref(collection);
+      const limitedHistoryCollections = new Set([
+        "alerts",
+        "care_logs",
+        "care_events",
+        "health_concerns",
+        "caregiver_notifications",
+      ]);
+      const ref = limitedHistoryCollections.has(collection)
+        ? db.ref(collection).orderByChild("createdAtMs").limitToLast(30)
+        : db.ref(collection);
 
       const handler = (snapshot) => {
         const value = snapshot.val();
@@ -283,8 +310,8 @@ const FirebaseService = (function () {
     return subscribeTo("care_logs", cb);
   }
 
-  function listenMedicineCareLogs(callback, limit = 50) {
-    const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 200);
+  function listenMedicineCareLogs(callback, limit = 30) {
+    const safeLimit = Math.min(Math.max(Number(limit) || 30, 1), 30);
     const isMedicineLog = (log) =>
       log?.category === "medicine" ||
       (typeof log?.type === "string" && log.type.startsWith("medicine_"));
@@ -293,7 +320,7 @@ const FirebaseService = (function () {
         (logs || []).filter(isMedicineLog).map((log) => ({
           ...log,
           timestamp: normalizeTimestamp(
-            log.createdAt || log.receivedAt || log.updatedAt,
+            log.createdAtMs || log.createdAt || log.receivedAt || log.updatedAt,
           ),
         })),
       );
@@ -393,19 +420,21 @@ const FirebaseService = (function () {
         .filter((item) => item && item.type === "health_concern")
         .map((item) => ({
           ...item,
-          timestamp: normalizeTimestamp(item.createdAt || item.receivedAt),
+          timestamp: normalizeTimestamp(
+            item.createdAtMs || item.createdAt || item.receivedAt,
+          ),
           resolved: item.resolved === true,
         })),
     ).slice(0, limit);
   }
 
-  function listenHealthConcerns(callback, limit = 20) {
-    const safeLimit = Math.min(Math.max(Number(limit) || 20, 1), 50);
+  function listenHealthConcerns(callback, limit = 30) {
+    const safeLimit = Math.min(Math.max(Number(limit) || 30, 1), 30);
 
     if (useRealtime) {
       const query = db
         .ref("health_concerns")
-        .orderByChild("createdAt")
+        .orderByChild("createdAtMs")
         .limitToLast(safeLimit);
       const handler = (snapshot) => {
         callback(normalizeHealthConcerns(snapshot.val(), safeLimit));
@@ -1084,32 +1113,32 @@ const FirebaseService = (function () {
 
   async function listAlerts() {
     if (useRealtime) {
-      return sortByCreatedAtDesc(
-        objectToArray(await getRealtimeValue("alerts")),
-      );
+      return sortByCreatedAtDesc(await getLimitedRealtimeCollection("alerts"));
     }
 
-    return JSON.parse(localStorage.getItem("mock:alerts") || "[]");
+    return sortByCreatedAtDesc(
+      JSON.parse(localStorage.getItem("mock:alerts") || "[]"),
+    ).slice(0, 30);
   }
 
   async function listCareLogs() {
     if (useRealtime) {
-      return sortByCreatedAtDesc(
-        objectToArray(await getRealtimeValue("care_logs")),
-      );
+      return sortByCreatedAtDesc(await getLimitedRealtimeCollection("care_logs"));
     }
 
-    return JSON.parse(localStorage.getItem("mock:care_logs") || "[]");
+    return sortByCreatedAtDesc(
+      JSON.parse(localStorage.getItem("mock:care_logs") || "[]"),
+    ).slice(0, 30);
   }
 
   async function listCareEvents() {
     if (useRealtime) {
-      return sortByCreatedAtDesc(
-        objectToArray(await getRealtimeValue("care_events")),
-      );
+      return sortByCreatedAtDesc(await getLimitedRealtimeCollection("care_events"));
     }
 
-    return JSON.parse(localStorage.getItem("mock:care_events") || "[]");
+    return sortByCreatedAtDesc(
+      JSON.parse(localStorage.getItem("mock:care_events") || "[]"),
+    ).slice(0, 30);
   }
 
   // ---------- Seed data ----------

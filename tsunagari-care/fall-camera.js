@@ -2,9 +2,12 @@
   const CAMERA_ID = "default_cam";
   const LOCATION = "living_room";
   const LOG_KEY = "tsunagari_fall_camera_log";
+  const MAX_LOCAL_LOG_ITEMS = 20;
   const DETECTION_INTERVAL_MS = 200;
-  const SUSPECTED_FALL_MS = 3000;
-  const CONFIRMED_FALL_MS = 8000;
+  const LYING_DURATION_LOG_INTERVAL_MS = 1000;
+  const SUSPECTED_FALL_MS = 1500;
+  // Demo threshold. Real deployments may prefer 5000-10000 ms.
+  const CONFIRMED_FALL_MS = 3000;
   const FALL_ALERT_COOLDOWN_MS = 30000;
   const FALL_EMERGENCY_COOLDOWN_MS = 30000;
   const FALL_RESET_GRACE_MS = 1500;
@@ -39,6 +42,20 @@
     [28, 30],
     [30, 32],
   ];
+  const FALL_STAGE_LABELS = {
+    normal: "Normal",
+    suspected_fall: "Suspected Fall",
+    confirmed_fall: "Confirmed Fall",
+    chami_check_sent: "Chami Check Sent",
+    cooldown: "Cooldown",
+  };
+  const FALL_STAGE_TONES = {
+    normal: "success",
+    suspected_fall: "warning",
+    confirmed_fall: "danger",
+    chami_check_sent: "accent",
+    cooldown: "accent",
+  };
 
   const video = document.getElementById("camera-video");
   const canvas = document.getElementById("camera-overlay");
@@ -46,6 +63,7 @@
   const startButton = document.getElementById("start-camera");
   const stopButton = document.getElementById("stop-camera");
   const testFallAlertButton = document.getElementById("test-fall-alert");
+  const resetFallStateButton = document.getElementById("reset-fall-state");
   const clearLogButton = document.getElementById("clear-log");
   const logList = document.getElementById("local-log");
   const fallCommandStatus = document.getElementById("fall-command-status");
@@ -53,7 +71,12 @@
   const cameraStatusPill = document.getElementById("camera-status-pill");
   const personStatus = document.getElementById("person-status");
   const postureStatus = document.getElementById("posture-status");
+  const detectionStage = document.getElementById("detection-stage");
   const fallStatus = document.getElementById("fall-status");
+  const lyingDurationStatus = document.getElementById("lying-duration");
+  const fallConfidenceStatus = document.getElementById("fall-confidence");
+  const cooldownStatus = document.getElementById("cooldown-status");
+  const lastChamiCommandStatus = document.getElementById("last-chami-command");
 
   let stream = null;
   let firestoreDb = null;
@@ -61,6 +84,7 @@
   let poseLandmarker = null;
   let poseLoadPromise = null;
   let detectionAnimationId = null;
+  let cooldownAnimationId = null;
   let lastDetectionAt = 0;
   let lyingStartAt = null;
   let fallEventActive = false;
@@ -74,7 +98,19 @@
   let lastFallEmergencyCommandAt = 0;
   let fallEmergencyCommandPending = false;
   let currentFallEventConfirmed = false;
+  let chamiCheckSentForCurrentEvent = false;
   let fallExitStartedAt = null;
+  let lastLyingDurationLoggedAt = 0;
+  let lastPersonDetected = false;
+  let suspectedFallLogged = false;
+  let currentFallStage = "normal";
+  let currentChamiCommandId = null;
+  let currentFallFlowId = null;
+  let fallConfirmedCareEventWritten = false;
+
+  function clamp(value, min, max) {
+    return Math.min(max, Math.max(min, value));
+  }
 
   function getFirebaseConfig() {
     if (window.firebaseConfig) return window.firebaseConfig;
@@ -149,6 +185,33 @@
     localStorage.setItem(LOG_KEY, JSON.stringify(logs));
   }
 
+  function renderLogs() {
+    const logs = getLogs();
+    logList.innerHTML = "";
+
+    if (logs.length === 0) {
+      const emptyItem = document.createElement("li");
+      emptyItem.className = "empty-log";
+      emptyItem.textContent = "No local events";
+      logList.appendChild(emptyItem);
+      return;
+    }
+
+    logs.forEach((entry) => {
+      const item = document.createElement("li");
+      const title = document.createElement("strong");
+      const time = document.createElement("time");
+
+      title.textContent = entry.message;
+      time.dateTime = entry.timestamp;
+      time.textContent = new Date(entry.timestamp).toLocaleString();
+
+      item.appendChild(title);
+      item.appendChild(time);
+      logList.appendChild(item);
+    });
+  }
+
   function addLog(message) {
     const logs = getLogs();
     logs.unshift({
@@ -157,7 +220,7 @@
       message,
       timestamp: new Date().toISOString(),
     });
-    saveLogs(logs.slice(0, 50));
+    saveLogs(logs.slice(0, MAX_LOCAL_LOG_ITEMS));
     renderLogs();
   }
 
@@ -237,6 +300,145 @@
     });
   }
 
+  function setStatusTone(element, tone = "") {
+    if (!element) return;
+
+    if (tone) {
+      element.dataset.tone = tone;
+    } else {
+      delete element.dataset.tone;
+    }
+  }
+
+  function getCooldownRemainingMs(now = Date.now()) {
+    const alertCooldownRemaining = Math.max(0, nextFallEventAllowedAt - now);
+    const emergencyCooldownRemaining = lastFallEmergencyCommandAt
+      ? Math.max(
+          0,
+          lastFallEmergencyCommandAt + FALL_EMERGENCY_COOLDOWN_MS - now,
+        )
+      : 0;
+
+    return Math.max(alertCooldownRemaining, emergencyCooldownRemaining);
+  }
+
+  function updateCooldownUI(now = Date.now()) {
+    const remainingMs = getCooldownRemainingMs(now);
+
+    if (remainingMs > 0) {
+      cooldownStatus.textContent = `Cooldown: ${Math.ceil(remainingMs / 1000)}s`;
+      setStatusTone(cooldownStatus, "warning");
+      return remainingMs;
+    }
+
+    cooldownStatus.textContent = "Ready";
+    setStatusTone(cooldownStatus, "success");
+    return 0;
+  }
+
+  function updateLastChamiCommandStatus(message = "Waiting", tone = "") {
+    if (!lastChamiCommandStatus) return;
+
+    lastChamiCommandStatus.textContent = message;
+    setStatusTone(lastChamiCommandStatus, tone);
+  }
+
+  function getCurrentLyingDuration(now = Date.now()) {
+    return lyingStartAt ? Math.max(0, now - lyingStartAt) : 0;
+  }
+
+  function calculateDemoFallConfidence(hasPerson, stage, lyingDurationMs) {
+    // Demo confidence only. This is not a true ML probability.
+    if (!hasPerson) return 0;
+
+    if (stage === "normal") return 20;
+
+    if (stage === "cooldown") return 30;
+
+    if (stage === "suspected_fall") {
+      const progress = clamp(lyingDurationMs / CONFIRMED_FALL_MS, 0, 1);
+      return Math.round(40 + progress * 40);
+    }
+
+    return 95;
+  }
+
+  function updateFallProgressUI({
+    hasPerson = lastPersonDetected,
+    lyingDurationMs = getCurrentLyingDuration(),
+    stage = currentFallStage,
+    now = Date.now(),
+  } = {}) {
+    const targetSeconds = (CONFIRMED_FALL_MS / 1000).toFixed(1);
+    const currentSeconds = hasPerson
+      ? (lyingDurationMs / 1000).toFixed(1)
+      : "0.0";
+    const demoConfidence = calculateDemoFallConfidence(
+      hasPerson,
+      stage,
+      lyingDurationMs,
+    );
+
+    lyingDurationStatus.textContent = `${currentSeconds}s / ${targetSeconds}s`;
+    fallConfidenceStatus.textContent = `${demoConfidence}% (demo)`;
+    setStatusTone(
+      fallConfidenceStatus,
+      FALL_STAGE_TONES[stage] || (hasPerson ? "normal" : "normal"),
+    );
+    updateCooldownUI(now);
+  }
+
+  function setFallStage(
+    stage,
+    {
+      hasPerson = lastPersonDetected,
+      lyingDurationMs = getCurrentLyingDuration(),
+      fallStatusText = FALL_STAGE_LABELS[stage] || "Normal",
+      now = Date.now(),
+    } = {},
+  ) {
+    currentFallStage = stage;
+
+    detectionStage.textContent = FALL_STAGE_LABELS[stage] || "Normal";
+    fallStatus.textContent = fallStatusText;
+
+    const tone = FALL_STAGE_TONES[stage] || "normal";
+    setStatusTone(detectionStage, tone);
+    setStatusTone(fallStatus, tone);
+
+    updateFallProgressUI({ hasPerson, lyingDurationMs, stage, now });
+  }
+
+  function refreshIdleStage(now = Date.now(), hasPerson = lastPersonDetected) {
+    const remainingMs = getCooldownRemainingMs(now);
+
+    if (
+      remainingMs > 0 &&
+      !lyingStartAt &&
+      !fallEventActive &&
+      !currentFallEventConfirmed &&
+      !chamiCheckSentForCurrentEvent
+    ) {
+      if (currentFallStage !== "cooldown") {
+        logCameraEvent("FallCamera: fall emergency cooldown active");
+      }
+      setFallStage("cooldown", {
+        hasPerson,
+        lyingDurationMs: 0,
+        fallStatusText: "Cooldown",
+        now,
+      });
+      return;
+    }
+
+    setFallStage("normal", {
+      hasPerson,
+      lyingDurationMs: 0,
+      fallStatusText: "Normal",
+      now,
+    });
+  }
+
   async function hasPendingChamiEmergencyCheckCommand() {
     const firebaseService = getFirebaseService();
     let commands = [];
@@ -299,6 +501,54 @@
     return data;
   }
 
+  function getOrCreateFallFlowId() {
+    if (!currentFallFlowId) {
+      currentFallFlowId = `fall_${Date.now()}`;
+    }
+
+    return currentFallFlowId;
+  }
+
+  async function writeFallResponseCareEvent(type, status, message, detail, extra = {}) {
+    const payload = {
+      flow: "fall_response",
+      flowId: getOrCreateFallFlowId(),
+      source: "fall_camera",
+      type,
+      status,
+      message,
+      detail,
+      relatedCommandId: extra.relatedCommandId || "",
+      relatedAlertId: "",
+      cameraId: CAMERA_ID,
+      location: LOCATION,
+    };
+
+    try {
+      const firebaseService = getFirebaseService();
+      if (
+        firebaseService &&
+        typeof firebaseService.createCareEvent === "function"
+      ) {
+        await firebaseService.createCareEvent(payload);
+      } else {
+        const realtimeDb = getRealtimeDatabaseOrThrow();
+        const ref = realtimeDb.ref("care_events").push();
+        await ref.set({
+          id: ref.key,
+          ...payload,
+          createdAt: firebase.database.ServerValue.TIMESTAMP,
+        });
+      }
+
+      logCameraEvent(`care event written: ${type}`);
+      return true;
+    } catch (error) {
+      logCameraEvent(`care event write failed: ${type}`, "warn", error);
+      return false;
+    }
+  }
+
   async function handleFallConfirmed() {
     logCameraEvent("Fall confirmed by camera");
 
@@ -307,10 +557,32 @@
     }
 
     fallEmergencyCommandPending = true;
+    getOrCreateFallFlowId();
+    if (!fallConfirmedCareEventWritten) {
+      fallConfirmedCareEventWritten = true;
+      writeFallResponseCareEvent(
+        "fall_confirmed",
+        "danger",
+        "Camera phát hiện nguy cơ té ngã",
+        "Fall Camera xác nhận tư thế nằm/ngã",
+      );
+    }
+    setFallStage("confirmed_fall", {
+      hasPerson: lastPersonDetected,
+      lyingDurationMs: getCurrentLyingDuration(),
+      fallStatusText: "Confirmed Fall",
+    });
 
     try {
       if (await hasPendingChamiEmergencyCheckCommand()) {
+        chamiCheckSentForCurrentEvent = true;
         logCameraEvent("Emergency_check command already pending for Chami");
+        setFallStage("chami_check_sent", {
+          hasPerson: lastPersonDetected,
+          lyingDurationMs: getCurrentLyingDuration(),
+          fallStatusText: "Chami Check Sent",
+        });
+        updateLastChamiCommandStatus("Pending command already exists", "warning");
         setFallCommandStatus(
           "Chami đã có yêu cầu kiểm tra đang chờ xử lý",
           "warning",
@@ -323,6 +595,13 @@
         Date.now() - lastFallEmergencyCommandAt < FALL_EMERGENCY_COOLDOWN_MS
       ) {
         logCameraEvent("Fall emergency_check skipped by cooldown");
+        logCameraEvent("FallCamera: fall emergency cooldown active");
+        setFallStage("cooldown", {
+          hasPerson: lastPersonDetected,
+          lyingDurationMs: getCurrentLyingDuration(),
+          fallStatusText: "Cooldown",
+        });
+        updateLastChamiCommandStatus("Cooldown active", "warning");
         setFallCommandStatus(
           "Đã phát hiện ngã, đang trong thời gian chờ chống spam",
           "warning",
@@ -333,10 +612,30 @@
       logCameraEvent("Creating Chami emergency_check command from fall camera");
       const command = await createChamiEmergencyCheckCommand();
       lastFallEmergencyCommandAt = Date.now();
+      chamiCheckSentForCurrentEvent = true;
+      currentChamiCommandId = command && command.id ? command.id : null;
       logCameraEvent("Created Chami emergency_check command from fall camera");
-      if (command && command.id) {
-        addLog(`Chami emergency_check command id: ${command.id}`);
+      if (currentChamiCommandId) {
+        addLog(`Chami emergency_check command id: ${currentChamiCommandId}`);
       }
+      writeFallResponseCareEvent(
+        "chami_command_sent",
+        "active",
+        "Đã yêu cầu Chami kiểm tra người dùng",
+        "Command emergency_check đã được gửi tới Chami",
+        { relatedCommandId: currentChamiCommandId || "" },
+      );
+      setFallStage("chami_check_sent", {
+        hasPerson: lastPersonDetected,
+        lyingDurationMs: getCurrentLyingDuration(),
+        fallStatusText: "Chami Check Sent",
+      });
+      updateLastChamiCommandStatus(
+        currentChamiCommandId
+          ? `Created: ${currentChamiCommandId}`
+          : "Created successfully",
+        "success",
+      );
       setFallCommandStatus("Đã yêu cầu Chami kiểm tra người dùng", "success");
     } catch (error) {
       logCameraEvent(
@@ -344,12 +643,11 @@
         "error",
         error,
       );
-      setFallCommandStatus(
-        "Không thể gửi yêu cầu kiểm tra tới Chami",
-        "danger",
-      );
+      updateLastChamiCommandStatus("Command error", "danger");
+      setFallCommandStatus("Không thể gửi yêu cầu kiểm tra tới Chami", "danger");
     } finally {
       fallEmergencyCommandPending = false;
+      updateCooldownUI();
     }
   }
 
@@ -372,44 +670,22 @@
     });
   }
 
-  function confirmFallFromCamera() {
+  function confirmFallFromCamera(now = Date.now()) {
     if (currentFallEventConfirmed) {
       return;
     }
 
     currentFallEventConfirmed = true;
-    fallStatus.textContent = "Confirmed Fall";
-    console.log("FallCamera: confirmed fall threshold reached");
-    console.log("FallCamera: real camera confirmed fall");
+    setFallStage("confirmed_fall", {
+      hasPerson: true,
+      lyingDurationMs: getCurrentLyingDuration(now),
+      fallStatusText: "Confirmed Fall",
+      now,
+    });
+    logCameraEvent("FallCamera: confirmed fall threshold reached");
+    logCameraEvent("FallCamera: real camera confirmed fall");
     handleFallConfirmed();
     markCurrentFallAlertConfirmedIfNeeded();
-  }
-
-  function renderLogs() {
-    const logs = getLogs();
-    logList.innerHTML = "";
-
-    if (logs.length === 0) {
-      const emptyItem = document.createElement("li");
-      emptyItem.className = "empty-log";
-      emptyItem.textContent = "No local events";
-      logList.appendChild(emptyItem);
-      return;
-    }
-
-    logs.forEach((entry) => {
-      const item = document.createElement("li");
-      const title = document.createElement("strong");
-      const time = document.createElement("time");
-
-      title.textContent = entry.message;
-      time.dateTime = entry.timestamp;
-      time.textContent = new Date(entry.timestamp).toLocaleString();
-
-      item.appendChild(title);
-      item.appendChild(time);
-      logList.appendChild(item);
-    });
   }
 
   function setCameraOnline(isOnline) {
@@ -449,23 +725,6 @@
     });
   }
 
-  async function createTestFallAlert() {
-    const db = getFirestoreOrThrow();
-
-    return db.collection("fallAlerts").add({
-      cameraId: CAMERA_ID,
-      location: LOCATION,
-      type: "fall_detected",
-      status: "suspected",
-      confidence: 0.8,
-      source: "webcam",
-      aiModel: "manual_test",
-      createdAt: getServerTimestamp(),
-      resolvedAt: null,
-      note: "Demo fall alert from webcam module",
-    });
-  }
-
   async function runCameraStatusSync(syncFn, successMessage) {
     try {
       await syncFn();
@@ -478,7 +737,6 @@
     }
   }
 
-  // MediaPipe setup: load the Tasks Vision bundle, WASM files, and pose model.
   async function initPoseLandmarker() {
     if (poseLandmarker) return poseLandmarker;
     if (poseLoadPromise) return poseLoadPromise;
@@ -563,7 +821,6 @@
     };
   }
 
-  // Posture calculation: use a simple body bounding box from reliable landmarks.
   function calculatePosture(landmarks) {
     if (!landmarks || landmarks.length === 0) {
       return {
@@ -622,45 +879,108 @@
 
   function updatePoseStatus(postureInfo) {
     if (!postureInfo.hasPerson) {
+      lastPersonDetected = false;
       personStatus.textContent = "No person";
       postureStatus.textContent = "Unknown";
       return;
     }
 
+    if (!lastPersonDetected) {
+      logCameraEvent("FallCamera: person detected");
+    }
+
+    lastPersonDetected = true;
     personStatus.textContent = "Person detected";
     postureStatus.textContent = postureInfo.posture;
   }
 
-  // Fall detection: require lying posture to persist before changing severity.
   function handleFallDetection(postureInfo, now = Date.now()) {
+    updateCooldownUI(now);
+
     if (!postureInfo.hasPerson || postureInfo.posture !== "Lying") {
-      if (!fallExitStartedAt) {
-        fallExitStartedAt = now;
+      const hadActiveSequence =
+        lyingStartAt ||
+        fallEventActive ||
+        currentFallAlertId ||
+        currentFallEventConfirmed ||
+        chamiCheckSentForCurrentEvent;
+
+      if (hadActiveSequence) {
+        if (!fallExitStartedAt) {
+          fallExitStartedAt = now;
+        }
+
+        if (now - fallExitStartedAt >= FALL_RESET_GRACE_MS) {
+          resetFallEvent(now, true, "recovery");
+        } else {
+          refreshIdleStage(now, postureInfo.hasPerson);
+          updateFallProgressUI({
+            hasPerson: postureInfo.hasPerson,
+            lyingDurationMs: 0,
+            stage: currentFallStage,
+            now,
+          });
+        }
+      } else {
+        fallExitStartedAt = null;
+        refreshIdleStage(now, postureInfo.hasPerson);
+        updateFallProgressUI({
+          hasPerson: postureInfo.hasPerson,
+          lyingDurationMs: 0,
+          stage: currentFallStage,
+          now,
+        });
       }
 
-      if (fallExitStartedAt && now - fallExitStartedAt >= FALL_RESET_GRACE_MS) {
-        resetFallEvent(now, true);
-        fallStatus.textContent = "Normal";
-      }
       return;
     }
 
     fallExitStartedAt = null;
-    if (!lyingStartAt) lyingStartAt = now;
+
+    if (!lyingStartAt) {
+      lyingStartAt = now;
+      lastLyingDurationLoggedAt = 0;
+      suspectedFallLogged = false;
+      logCameraEvent("FallCamera: lying candidate started");
+    }
 
     const lyingDuration = now - lyingStartAt;
-    const confidence = Math.max(
-      0,
-      Math.min(1, postureInfo.confidence || 0),
-    );
-    console.log(`FallCamera: lying duration ms=${lyingDuration}`);
+    const confidence = clamp(postureInfo.confidence || 0, 0, 1);
 
-    if (lyingDuration >= CONFIRMED_FALL_MS) {
-      fallStatus.textContent = "Confirmed Fall";
-    } else if (lyingDuration >= SUSPECTED_FALL_MS) {
-      fallStatus.textContent = "Suspected Fall";
+    if (
+      !lastLyingDurationLoggedAt ||
+      now - lastLyingDurationLoggedAt >= LYING_DURATION_LOG_INTERVAL_MS
+    ) {
+      lastLyingDurationLoggedAt = now;
+      logCameraEvent(`FallCamera: lying duration ms=${lyingDuration}`);
+    }
+
+    if (!suspectedFallLogged) {
+      suspectedFallLogged = true;
+      logCameraEvent("FallCamera: suspected fall");
+    }
+
+    if (chamiCheckSentForCurrentEvent) {
+      setFallStage("chami_check_sent", {
+        hasPerson: true,
+        lyingDurationMs: lyingDuration,
+        fallStatusText: "Chami Check Sent",
+        now,
+      });
+    } else if (currentFallEventConfirmed) {
+      setFallStage("confirmed_fall", {
+        hasPerson: true,
+        lyingDurationMs: lyingDuration,
+        fallStatusText: "Confirmed Fall",
+        now,
+      });
     } else {
-      fallStatus.textContent = "Normal";
+      setFallStage("suspected_fall", {
+        hasPerson: true,
+        lyingDurationMs: lyingDuration,
+        fallStatusText: "Suspected Fall",
+        now,
+      });
     }
 
     if (
@@ -681,7 +1001,7 @@
         if (eventGeneration !== fallEventGeneration) return;
 
         if (!alertId) {
-          resetFallEvent(Date.now(), true);
+          resetFallEvent(Date.now(), true, "alert_failed");
           return;
         }
 
@@ -692,7 +1012,7 @@
     }
 
     if (lyingDuration >= CONFIRMED_FALL_MS) {
-      confirmFallFromCamera();
+      confirmFallFromCamera(now);
     }
   }
 
@@ -753,27 +1073,48 @@
     }
   }
 
-  function resetFallEvent(now = Date.now(), startCooldown = false) {
+  function resetFallEvent(now = Date.now(), startCooldown = false, reason = "") {
     const hadFallSequence =
-      lyingStartAt ||
+      !!lyingStartAt ||
       fallEventActive ||
-      currentFallAlertId ||
-      fallAlertCreatePending;
+      !!currentFallAlertId ||
+      fallAlertCreatePending ||
+      currentFallEventConfirmed ||
+      chamiCheckSentForCurrentEvent;
 
     lyingStartAt = null;
     fallEventActive = false;
     currentFallAlertId = null;
     fallAlertCreatePending = false;
     currentFallEventConfirmed = false;
+    chamiCheckSentForCurrentEvent = false;
+    currentFallFlowId = null;
+    fallConfirmedCareEventWritten = false;
     fallExitStartedAt = null;
     confirmedUpdateSent = false;
     confirmedUpdatePending = false;
+    suspectedFallLogged = false;
+    lastLyingDurationLoggedAt = 0;
     fallEventGeneration += 1;
 
     if (startCooldown && hadFallSequence) {
-      nextFallEventAllowedAt = now + FALL_ALERT_COOLDOWN_MS;
-      addLog("Fall event ended");
+      nextFallEventAllowedAt = Math.max(
+        nextFallEventAllowedAt,
+        now + FALL_ALERT_COOLDOWN_MS,
+      );
+      logCameraEvent("FallCamera: fall event reset after recovery");
+      if (reason === "recovery") {
+        setFallCommandStatus("Đang chờ cooldown trước khi detect lại", "warning");
+      }
     }
+
+    refreshIdleStage(now, lastPersonDetected);
+    updateFallProgressUI({
+      hasPerson: lastPersonDetected,
+      lyingDurationMs: 0,
+      stage: currentFallStage,
+      now,
+    });
   }
 
   function drawPose(landmarks, postureInfo) {
@@ -830,12 +1171,36 @@
     context.restore();
   }
 
+  function startCooldownTicker() {
+    if (cooldownAnimationId) return;
+
+    const tick = () => {
+      updateCooldownUI();
+      if (!stream && getCooldownRemainingMs() <= 0) {
+        cooldownAnimationId = null;
+        refreshIdleStage(Date.now(), false);
+        return;
+      }
+
+      cooldownAnimationId = window.setTimeout(tick, 250);
+    };
+
+    tick();
+  }
+
+  function stopCooldownTicker() {
+    if (!cooldownAnimationId) return;
+
+    window.clearTimeout(cooldownAnimationId);
+    cooldownAnimationId = null;
+  }
+
   function startPoseDetection() {
     if (detectionAnimationId || !poseLandmarker || !stream) return;
 
     lastDetectionAt = 0;
     mediaPipeRuntimeErrorLogged = false;
-
+    startCooldownTicker();
     detectPoseLoop();
   }
 
@@ -846,7 +1211,7 @@
     }
 
     lastDetectionAt = 0;
-    resetFallEvent(Date.now(), false);
+    resetFallEvent(Date.now(), false, "stopped");
   }
 
   function detectPoseLoop(timestamp = performance.now()) {
@@ -891,7 +1256,6 @@
     }
 
     try {
-      // Request one webcam stream and attach it directly to the video element.
       stream = await navigator.mediaDevices.getUserMedia({
         audio: false,
         video: {
@@ -908,8 +1272,12 @@
       postureStatus.textContent = poseLandmarker
         ? "Unknown"
         : "Loading MediaPipe Pose...";
-      fallStatus.textContent = "Normal";
+      refreshIdleStage(Date.now(), false);
       setFallCommandStatus("");
+      updateLastChamiCommandStatus(
+        currentChamiCommandId ? `Last: ${currentChamiCommandId}` : "Waiting",
+        currentChamiCommandId ? "success" : "",
+      );
       addLog("Camera started");
       runCameraStatusSync(syncCameraOnline, "Firestore camera status: online");
       resizeOverlay();
@@ -938,7 +1306,8 @@
     setCameraOnline(false);
     personStatus.textContent = "No person";
     postureStatus.textContent = "Unknown";
-    fallStatus.textContent = "Normal";
+    lastPersonDetected = false;
+    refreshIdleStage(Date.now(), false);
     setFallCommandStatus("");
     canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
     addLog("Camera stopped");
@@ -949,8 +1318,20 @@
     testFallAlertButton.disabled = true;
 
     try {
-      fallStatus.textContent = "Confirmed Fall";
+      if (
+        currentFallFlowId &&
+        !fallEmergencyCommandPending &&
+        getCooldownRemainingMs() === 0
+      ) {
+        resetFallEvent(Date.now(), false, "manual_demo_repeat");
+      }
       logCameraEvent("Manual demo fall confirmed");
+      currentFallEventConfirmed = true;
+      setFallStage("confirmed_fall", {
+        hasPerson: true,
+        lyingDurationMs: Math.max(CONFIRMED_FALL_MS, getCurrentLyingDuration()),
+        fallStatusText: "Confirmed Fall",
+      });
       await handleFallConfirmed();
     } catch (error) {
       logCameraEvent("Manual test fall flow failed", "error", error);
@@ -958,6 +1339,16 @@
     } finally {
       testFallAlertButton.disabled = false;
     }
+  }
+
+  function handleManualResetFallState() {
+    logCameraEvent("FallCamera: manual fall state reset");
+    resetFallEvent(Date.now(), false, "manual");
+    setFallCommandStatus("");
+    updateLastChamiCommandStatus(
+      currentChamiCommandId ? `Last: ${currentChamiCommandId}` : "Waiting",
+      currentChamiCommandId ? "success" : "",
+    );
   }
 
   function clearLocalLog() {
@@ -968,6 +1359,7 @@
   startButton.addEventListener("click", startCamera);
   stopButton.addEventListener("click", stopCamera);
   testFallAlertButton.addEventListener("click", handleManualTestFallAlert);
+  resetFallStateButton.addEventListener("click", handleManualResetFallState);
   clearLogButton.addEventListener("click", clearLocalLog);
   video.addEventListener("loadedmetadata", resizeOverlay);
   window.addEventListener("resize", resizeOverlay);
@@ -975,6 +1367,9 @@
 
   setCameraOnline(false);
   setFallCommandStatus("");
+  updateLastChamiCommandStatus("Waiting");
+  refreshIdleStage(Date.now(), false);
   renderLogs();
+  startCooldownTicker();
   initPoseLandmarker().catch(() => {});
 })();
