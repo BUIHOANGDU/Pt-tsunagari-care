@@ -3,8 +3,10 @@ node_modules/
 dist/
 *.log
 
-# Firebase real config - do not commit
-src/js/firebase-config.js
+# Backend and Admin SDK secrets - do not commit
 *.serviceAccount.json
 serviceAccountKey.json
 firebase-adminsdk*.json
+
+# Frontend Firebase Web Config is public configuration and belongs in:
+# tsunagari-care/src/js/firebase-config.js
