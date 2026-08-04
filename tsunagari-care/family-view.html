@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>TsunagariCare Family</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./src/css/family-view.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content" data-i18n="skipToContent">本文へ移動</a>
+    <main class="family-shell" id="main-content">
+      <header class="family-header">
+        <div class="brand-block">
+          <span class="brand-logo" aria-hidden="true">
+            <svg viewBox="0 0 48 48" focusable="false">
+              <path d="M24 7c7.8 0 14.2 6.4 14.2 14.2 0 8.6-9.6 16.3-13.1 18.8a1.9 1.9 0 0 1-2.2 0C19.4 37.5 9.8 29.8 9.8 21.2 9.8 13.4 16.2 7 24 7Zm0 7.5a6.7 6.7 0 0 0-6.7 6.7c0 4 4.2 8.6 6.7 10.9 2.5-2.3 6.7-6.9 6.7-10.9A6.7 6.7 0 0 0 24 14.5Z" />
+            </svg>
+          </span>
+          <div>
+            <p class="eyebrow" data-i18n="familyMonitoring">ファミリーモニタリング</p>
+            <h1>TsunagariCare Family</h1>
+            <p class="person-name" id="care-recipient-name">Chami Care</p>
+          </div>
+        </div>
+        <div class="header-actions">
+          <div
+            class="language-switcher"
+            role="group"
+            aria-label="表示言語"
+            data-i18n-aria-label="language"
+          >
+            <button type="button" data-language-option="ja">日本語</button>
+            <button type="button" data-language-option="vi">Tiếng Việt</button>
+          </div>
+          <div class="overall-status" aria-live="polite">
+            <span id="overall-status-badge" class="badge is-muted" data-i18n="checking">確認中</span>
+            <span class="last-updated">
+              <span data-i18n="lastUpdated">最終更新</span>
+              <strong id="last-updated">--</strong>
+            </span>
+          </div>
+        </div>
+      </header>
+
+      <section class="camera-panel" aria-labelledby="camera-title">
+        <div class="section-heading camera-heading">
+          <div>
+            <p class="eyebrow" data-i18n="cameraArea">カメラエリア</p>
+            <h2 id="camera-title" data-i18n="liveCamera">ライブカメラ</h2>
+            <p class="section-subtitle" data-i18n="cameraSubtitle">
+              Camera Hostから届く映像だけを表示します。
+            </p>
+          </div>
+          <div class="camera-badges" aria-live="polite">
+            <span id="camera-state-badge" class="badge is-muted" data-i18n="cameraNotConfigured">カメラ未設定</span>
+            <span id="connection-state-badge" class="badge is-muted" data-i18n="waitingSource">映像待機中</span>
+          </div>
+        </div>
+
+        <div class="video-frame">
+          <video
+            id="remote-video"
+            autoplay
+            playsinline
+            muted
+            aria-label="Camera Hostの映像"
+            data-i18n-aria-label="remoteCameraVideo"
+          ></video>
+          <div id="video-placeholder" class="video-placeholder" aria-live="polite">
+            <span class="placeholder-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path d="M5 7.5A2.5 2.5 0 0 1 7.5 5h6A2.5 2.5 0 0 1 16 7.5v.8l2.9-1.8A1.4 1.4 0 0 1 21 7.7v8.6a1.4 1.4 0 0 1-2.1 1.2L16 15.7v.8a2.5 2.5 0 0 1-2.5 2.5h-6A2.5 2.5 0 0 1 5 16.5v-9Z" />
+              </svg>
+            </span>
+            <strong data-i18n="noCameraSource">ライブカメラの送信元がまだありません</strong>
+            <span data-i18n="viewerNoLocalCamera">この端末のカメラやマイクは使用しません。</span>
+          </div>
+        </div>
+
+        <div class="camera-toolbar">
+          <div class="camera-actions">
+            <button type="button" id="retry-camera" class="btn secondary" data-i18n-aria-label="retryConnection">
+              <span aria-hidden="true" class="btn-icon">↻</span>
+              <span data-i18n="retryConnection">再接続</span>
+            </button>
+            <button
+              type="button"
+              id="fullscreen-camera"
+              class="btn"
+              data-i18n-aria-label="fullscreen"
+              disabled
+            >
+              <span aria-hidden="true" class="btn-icon">□</span>
+              <span data-i18n="fullscreen">全画面</span>
+            </button>
+          </div>
+          <dl class="camera-meta">
+            <div class="info-chip">
+              <dt data-i18n="hostDevice">Camera Host</dt>
+              <dd id="host-device-id">camera_home_001</dd>
+            </div>
+            <div class="info-chip">
+              <dt data-i18n="hostHeartbeat">ハートビート</dt>
+              <dd id="host-heartbeat">--</dd>
+            </div>
+            <div class="info-chip">
+              <dt data-i18n="connectionStatus">接続状態</dt>
+              <dd id="camera-connection-text" data-i18n="notConfigured">未設定</dd>
+            </div>
+          </dl>
+        </div>
+      </section>
+
+      <section class="content-grid">
+        <article class="summary-card status-card" aria-labelledby="status-title">
+          <div class="section-heading compact">
+            <div>
+              <p class="eyebrow" data-i18n="statusSummary">ステータス概要</p>
+              <h2 id="status-title" data-i18n="familyStatus">見守り状態</h2>
+            </div>
+          </div>
+          <dl class="status-grid">
+            <div class="metric-card">
+              <dt data-i18n="chamiStatus">Chami状態</dt>
+              <dd id="chami-status" data-i18n="unknown">不明</dd>
+            </div>
+            <div class="metric-card">
+              <dt data-i18n="cameraHostStatus">Camera Host状態</dt>
+              <dd id="camera-host-status" data-i18n="cameraNotConfigured">カメラ未設定</dd>
+            </div>
+            <div class="metric-card">
+              <dt data-i18n="fallDetection">転倒検知</dt>
+              <dd id="fall-detection-status" data-i18n="unknown">不明</dd>
+            </div>
+            <div class="metric-card">
+              <dt data-i18n="safetyOverview">安全概要</dt>
+              <dd id="safety-overview" data-i18n="checking">確認中</dd>
+            </div>
+          </dl>
+        </article>
+
+        <article class="summary-card environment-card" aria-labelledby="environment-title">
+          <div class="section-heading compact">
+            <div>
+              <p class="eyebrow" data-i18n="environmentSummary">環境サマリー</p>
+              <h2 id="environment-title" data-i18n="environment">環境</h2>
+            </div>
+          </div>
+          <dl class="environment-grid">
+            <div class="metric-card">
+              <dt data-i18n="outdoorTemp">外気温</dt>
+              <dd id="outdoor-temp">--</dd>
+            </div>
+            <div class="metric-card">
+              <dt data-i18n="weather">天気</dt>
+              <dd id="weather-state" data-i18n="weatherUnavailable">天気情報なし</dd>
+            </div>
+            <div class="metric-card">
+              <dt data-i18n="roomTemp">室温</dt>
+              <dd>
+                <span id="room-temp" data-i18n="noSensorConnected">センサー未接続</span>
+                <span class="mini-badge" data-i18n="noSensor">センサーなし</span>
+              </dd>
+            </div>
+            <div class="metric-card">
+              <dt data-i18n="humidity">湿度</dt>
+              <dd id="room-humidity" data-i18n="noSensor">センサーなし</dd>
+            </div>
+          </dl>
+          <p class="note" id="environment-note" data-i18n="roomSensorNote">
+            室内センサーはまだ接続されていません。
+          </p>
+        </article>
+      </section>
+
+      <section
+        class="history-grid"
+        aria-label="家族向けケア履歴"
+        data-i18n-aria-label="familyHistory"
+      >
+        <article class="list-card alerts-card" aria-labelledby="alerts-title">
+          <div class="section-heading compact">
+            <div>
+              <p class="eyebrow" data-i18n="alertsSummary">重要なお知らせ</p>
+              <h2 id="alerts-title" data-i18n="latestAlerts">最新アラート</h2>
+            </div>
+            <span class="count-label" data-i18n="maxThree">最大3件</span>
+          </div>
+          <ul id="alerts-list" class="compact-list" aria-live="polite"></ul>
+        </article>
+
+        <article class="list-card medicine-card" aria-labelledby="medicine-title">
+          <div class="section-heading compact">
+            <div>
+              <p class="eyebrow" data-i18n="careSchedule">ケア予定</p>
+              <h2 id="medicine-title" data-i18n="medicineToday">本日の服薬</h2>
+            </div>
+          </div>
+          <ul id="medicine-list" class="compact-list" aria-live="polite"></ul>
+        </article>
+
+        <article class="list-card health-card" aria-labelledby="health-title">
+          <div class="section-heading compact">
+            <div>
+              <p class="eyebrow" data-i18n="healthSummary">健康メモ</p>
+              <h2 id="health-title" data-i18n="recentHealth">最近の健康状態</h2>
+            </div>
+            <span class="count-label" data-i18n="maxFive">最大5件</span>
+          </div>
+          <ul id="health-list" class="compact-list" aria-live="polite"></ul>
+        </article>
+      </section>
+    </main>
+
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
+    <script src="./src/js/firebase-config.js"></script>
+    <script src="./src/js/webrtc-signaling.js"></script>
+    <script src="./src/js/family-view.js"></script>
+  </body>
+</html>

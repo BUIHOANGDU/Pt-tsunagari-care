@@ -1,3 +1,414 @@
+# 2026-08-05 01:30:19 +09:00 - Correction: Fall Detection Camera Is WebRTC Host
+
+## Reason
+
+The previous Camera Host Streaming phase created a separate `camera-host.html`
+page, but the required product architecture is different: the existing Fall
+Detection Camera MVP must be the only page that opens the webcam and publishes
+the WebRTC stream.
+
+## Corrected Architecture
+
+- Webcam is opened only by `tsunagari-care/fall-camera.js`.
+- The existing Fall Detection `stream` is reused for WebRTC publishing.
+- MediaPipe Fall Detection continues to use the same stream.
+- Family Viewer receives the stream from the Fall Detection Camera MVP host.
+- No second `getUserMedia()` call is introduced.
+- No separate Camera Host UI remains.
+
+Flow:
+
+```text
+webcam
+→ existing Fall Detection MediaStream
+→ MediaPipe Fall Detection
+→ WebRTC publisher
+→ Family Viewer remote video
+```
+
+## Fall Detection Changes
+
+Changed only:
+
+- `tsunagari-care/fall-camera.html`
+- `tsunagari-care/fall-camera.js`
+
+The HTML change only loads `src/js/webrtc-signaling.js` before
+`fall-camera.js`.
+
+The JavaScript change adds a small publisher lifecycle wrapper:
+
+- create signaling host controller after the existing camera stream starts
+- pass the existing `stream` into WebRTC via `start(() => stream)`
+- set `camera_hosts/camera_home_001` to `online=true`,
+  `streamReady=true`, and `fallDetectionActive=true`
+- close viewer peer connections and set `streamReady=false` on Stop Camera
+- best-effort `online=false` on page unload
+
+No MediaPipe algorithm, Pose Landmarker config, fall thresholds, skeleton
+rendering, cooldowns, fall alert logic, Firebase fall alert writes, LINE
+notification behavior, camera ID/location, or layout were changed.
+
+## Removed Separate Camera Host UI
+
+The separate Camera Host page/files created in the previous phase were removed
+because they are no longer the product architecture:
+
+- `tsunagari-care/camera-host.html`
+- `tsunagari-care/src/css/camera-host.css`
+- `tsunagari-care/src/js/camera-host.js`
+
+The useful shared signaling code remains in:
+
+- `tsunagari-care/src/js/webrtc-signaling.js`
+
+## Family Viewer
+
+Family Viewer continues to receive remote WebRTC tracks only. It does not call
+`getUserMedia()` or `getDisplayMedia()` and does not request camera or
+microphone permission.
+
+## Firebase Signaling
+
+Schema remains:
+
+- `camera_hosts/camera_home_001`
+- `camera_sessions/{sessionId}`
+- `camera_sessions/{sessionId}/hostCandidates`
+- `camera_sessions/{sessionId}/viewerCandidates`
+
+Firebase initialization uses the existing frontend Firebase Web Config and
+checks `firebase.apps` before initializing.
+
+## Heartbeat and Limits
+
+- Heartbeat interval: 10 seconds.
+- Family Viewer offline timeout: 35 seconds.
+- Multi-viewer limit: 3 sessions.
+- One `RTCPeerConnection` per viewer session.
+- Requesting sessions older than 60 seconds are expired.
+
+## Rules and TURN
+
+- `docs/camera-streaming-rules.md` was updated to describe Fall Detection
+  Camera as the host publisher.
+- No production Firebase Rules were deployed.
+- TURN is still not configured; STUN-only connectivity is not guaranteed across
+  all networks.
+
+## Checks
+
+- `node --check tsunagari-care/fall-camera.js` passed.
+- `node --check tsunagari-care/src/js/family-view.js` passed.
+- `node --check tsunagari-care/src/js/webrtc-signaling.js` passed.
+- `git grep -n "getUserMedia" -- tsunagari-care` showed `getUserMedia` only in
+  `tsunagari-care/fall-camera.js`.
+- Additional Family Viewer/signaling search found no `getUserMedia` or
+  `getDisplayMedia`.
+- `git diff -- tsunagari-care/fall-camera.css` remained empty.
+- `git diff HEAD --check` passed with Windows line-ending warnings only.
+
+## Tests Not Run
+
+No real two-tab browser test, real webcam permission test, RTDB rules write
+test, or two-device WebRTC test was run in this coding pass.
+
+## Out of Scope
+
+The existing untracked backend files remain untouched and untracked:
+
+- `server/lib/familySessionService.js`
+- `server/routes/family.js`
+
+No secrets were recorded.
+
+# 2026-08-05 01:15:16 +09:00 - Camera Host Streaming Only
+
+## Goal
+
+Added an independent Camera Host page that can run on a host device at the
+care recipient's home, open the host webcam after a user action, and publish
+WebRTC video to the existing Family Viewer.
+
+## Scope
+
+- Camera Host page only for local webcam capture and streaming.
+- Family Viewer updated only to receive a real remote WebRTC stream.
+- No backend files were modified or mounted.
+- No dashboard files were modified.
+- Locked Fall Detection files were not modified:
+  - `tsunagari-care/fall-camera.html`
+  - `tsunagari-care/fall-camera.css`
+  - `tsunagari-care/fall-camera.js`
+
+## Camera Host
+
+Created:
+
+- `tsunagari-care/camera-host.html`
+- `tsunagari-care/src/css/camera-host.css`
+- `tsunagari-care/src/js/camera-host.js`
+
+Camera Host includes:
+
+- Start Camera button.
+- Stop Camera button.
+- Local webcam preview on the host device.
+- Firebase/signaling/streaming status.
+- Viewer count.
+- Camera Host device ID.
+- Last heartbeat.
+- Clear streaming indicator.
+
+Camera Host is the only new code path that calls:
+
+```js
+navigator.mediaDevices.getUserMedia({
+  video: true,
+  audio: false,
+})
+```
+
+Audio is disabled.
+
+## Family Viewer Receiver
+
+Modified:
+
+- `tsunagari-care/family-view.html`
+- `tsunagari-care/src/js/family-view.js`
+
+Family Viewer now creates a viewer session, receives the host offer, creates an
+answer, exchanges ICE candidates, and attaches the real remote stream through:
+
+```js
+remoteVideo.srcObject = remoteStream;
+```
+
+Family Viewer does not request camera, microphone, or screen sharing.
+
+## WebRTC Signaling
+
+Created shared frontend module:
+
+- `tsunagari-care/src/js/webrtc-signaling.js`
+
+RTDB signaling paths:
+
+- `camera_hosts/camera_home_001`
+- `camera_sessions/{sessionId}`
+- `camera_sessions/{sessionId}/hostCandidates`
+- `camera_sessions/{sessionId}/viewerCandidates`
+
+Session flow:
+
+1. Family Viewer creates `status=requesting`.
+2. Camera Host receives the request.
+3. Camera Host creates one `RTCPeerConnection` per viewer.
+4. Camera Host adds webcam tracks and creates an offer.
+5. Family Viewer receives offer and writes answer.
+6. Both sides exchange ICE candidates.
+7. Family Viewer enables LIVE only after `ontrack` supplies a remote stream.
+
+## Heartbeat and Offline Policy
+
+- Camera Host heartbeat interval: 10 seconds.
+- Host status includes `online`, `streamReady`, `lastHeartbeatAt`, and
+  `updatedAt`.
+- Family Viewer treats host as offline when heartbeat is older than 35 seconds.
+- `pagehide` performs best-effort `online=false`; heartbeat timeout remains the
+  reliable offline detector.
+
+## Multi-Viewer Policy
+
+- Each Family Viewer gets its own session.
+- Camera Host keeps a `Map<sessionId, RTCPeerConnection>`.
+- MVP limit is 3 simultaneous viewers.
+- Viewer number 4 receives `busy`.
+- Closing a session closes only that viewer's peer connection and listeners.
+
+## Session Cleanup
+
+- Sessions include `expiresAt`.
+- Requesting sessions older than 60 seconds are marked `expired`.
+- Closed/failed/expired/busy sessions are not treated as active.
+- Both host and viewer remove Firebase listeners when closing connections.
+
+## STUN and TURN
+
+The shared WebRTC config uses:
+
+```js
+stun:stun.l.google.com:19302
+```
+
+No TURN credentials were added. Some 4G/5G or NAT networks may require TURN, so
+this is not yet production-ready for every network.
+
+## Firebase Rules
+
+Added proposal document:
+
+- `docs/camera-streaming-rules.md`
+
+No production Firebase Rules were changed or deployed.
+
+## Security and Privacy
+
+- No video frames, images, audio, recordings, raw streams, secrets, service
+  account JSON, LINE tokens, device tokens, family codes, or TURN credentials
+  are stored in Firebase or source files.
+- No audio track is requested.
+- No automatic recording or download feature exists.
+
+## Backend Untracked Files
+
+The existing untracked files were inspected and left untouched because they are
+outside this frontend signaling phase:
+
+- `server/lib/familySessionService.js`
+- `server/routes/family.js`
+
+They are not required for this phase because signaling is handled through
+Firebase RTDB frontend code.
+
+## Checks
+
+- `node --check tsunagari-care/src/js/camera-host.js` passed.
+- `node --check tsunagari-care/src/js/webrtc-signaling.js` passed.
+- `node --check tsunagari-care/src/js/family-view.js` passed.
+- `git diff -- tsunagari-care/fall-camera.html` showed no diff.
+- `git diff -- tsunagari-care/fall-camera.css` showed no diff.
+- `git diff -- tsunagari-care/fall-camera.js` showed no diff.
+- Additional grep and `git diff HEAD --check` were run in Codex and summarized
+  in the final report.
+
+## Tests Run
+
+Automated syntax and repository checks were run locally. A real webcam, RTDB
+rules write test, and two-device WebRTC test were not run in this coding pass.
+
+## Production Limitations
+
+- TURN is not configured.
+- Production RTDB rules must permit only the required signaling reads/writes.
+- End-to-end viewing still needs a real Camera Host browser and Family Viewer
+  browser test on the target networks.
+
+No secrets were recorded.
+
+# 2026-08-05 01:01:39 +09:00 - Family Viewer Only
+
+## Goal
+
+Created a standalone Family Viewer page for relatives to read the most important
+care information without touching backend, dashboard, or Fall Detection camera
+logic.
+
+## Scope
+
+- Frontend-only Family Viewer.
+- No backend route/service changes in this phase.
+- No dashboard changes in this phase.
+- No changes to `tsunagari-care/fall-camera.html`,
+  `tsunagari-care/fall-camera.css`, or `tsunagari-care/fall-camera.js`.
+- No MediaPipe, fall detection threshold, skeleton, camera permission, or alert
+  logic changes.
+
+## Camera Privacy
+
+- Family Viewer does not call `navigator.mediaDevices.getUserMedia()`.
+- Family Viewer does not call `navigator.mediaDevices.getDisplayMedia()`.
+- Family Viewer does not request camera, microphone, or screen sharing.
+- Family Viewer has no local preview, no local stream variable, no capture
+  stream, no recording, and no download action.
+- The camera area is receiver-only and exposes `attachRemoteStream(stream)` for
+  a future Camera Host publisher.
+- The LIVE badge is not shown unless a real remote stream is attached.
+
+## Data Displayed
+
+- Chami status from `robots/chami01`.
+- Camera Host status from `camera_hosts/camera_home_001` if it already exists.
+- Latest alerts from `alerts`, limited to 3.
+- Active medicine reminders from `reminders`, limited to 10 read / 8 rendered.
+- Recent health concerns from `health_concerns`, limited to 5.
+- Outdoor weather from existing backend `/api/weather/current`.
+- Room environment shows an explicit no-sensor state instead of fake live data.
+
+## Camera Section Status
+
+This phase does not create a Camera Host publisher and does not modify the
+existing Fall Detection page to publish WebRTC. The camera section currently
+handles these states safely:
+
+- camera not configured
+- Camera Host offline
+- Camera Host online but stream not ready
+- waiting for camera source
+- connecting
+- connected
+- disconnected
+- failed
+- session expired
+
+No fake video or fake LIVE state is used.
+
+## Files Created
+
+- `tsunagari-care/family-view.html`
+- `tsunagari-care/src/css/family-view.css`
+- `tsunagari-care/src/js/family-view.js`
+
+## Files Modified
+
+- `PROJECT_HISTORY.md`
+
+## Checks
+
+- `node --check tsunagari-care/src/js/family-view.js` passed.
+- `git diff HEAD --check` passed.
+- `git diff -- tsunagari-care/fall-camera.html` showed no diff.
+- `git diff -- tsunagari-care/fall-camera.css` showed no diff.
+- `git diff -- tsunagari-care/fall-camera.js` showed no diff.
+- `git grep -n "getUserMedia" -- tsunagari-care/family-view.html tsunagari-care/src/js/family-view*.js`
+  returned no matches.
+- `git grep -n "getDisplayMedia" -- tsunagari-care/family-view.html tsunagari-care/src/js/family-view*.js`
+  returned no matches.
+- Security search on the new Family Viewer files found no `private_key`,
+  `service_account`, `client_email`, `LINE_CHANNEL_ACCESS_TOKEN`,
+  `TSUNAGARI_DEVICE_TOKEN`, or `FIREBASE_SERVICE_ACCOUNT_JSON`.
+- Read-only search found no `.set()`, `.update()`, `.push()`, or `.remove()` in
+  `family-view.js`.
+- HTML asset paths use relative `./src/...` paths.
+
+## Tests Run
+
+Automated syntax, grep, path, and read-only searches were run locally. No real
+mobile browser or deployed GitHub Pages session was opened in this coding pass.
+
+## Tests Not Run
+
+- Real mobile layout on an actual phone.
+- Real remote stream from a Camera Host publisher.
+- Real host offline timeout with production Firebase data.
+- Production GitHub Pages load test.
+
+## Current Limitations
+
+- There is no Camera Host publisher implemented in this phase.
+- No WebRTC signaling session is created by Family Viewer in this phase.
+- Camera Host live video requires a future publisher/signaling phase.
+- Room sensor data is not available yet and is displayed as no-sensor, not live
+  data.
+
+## Next Step
+
+Implement a separate Camera Host publisher phase without modifying the locked
+Fall Detection page unless explicitly approved.
+
+No secrets were recorded.
+
 # 2026-07-27 02:11:00 +09:00 - Port Health Conversation Monitoring to Render root backend
 
 ## Context
@@ -2214,3 +2625,151 @@ bang Admin SDK, nen rules co the khoa write tu client.
 
 - Chua goi LINE that trong session nay vi khong co token/user ID.
 - Chua deploy Render va chua test voi Firebase RTDB production rules.
+
+# 2026-08-05 01:54 +09:00 - WebRTC publisher heartbeat_failed debug
+
+## Nguyen nhan
+
+- `tsunagari-care/src/js/webrtc-signaling.js` tao log ngan
+  `heartbeat_failed` tai `startHeartbeat()` khi `publishHostStatus()` reject.
+- Catch block cu chi goi `options.onError("heartbeat_failed", error)`, nen
+  Fall Detection local log chi thay nhan loi, khong thay Firebase error that.
+- Startup cu goi heartbeat truoc va `await publishHostStatus()` co the lam flow
+  start bi coi la failed trong khi session listener can tiep tuc lang nghe.
+
+## Sua doi
+
+- Giu publisher trong `fall-camera.html` hien co; khong tao Camera Host rieng.
+- Khong sua MediaPipe, threshold, skeleton, camera capture, alert logic, hoac
+  `fall-camera.css`.
+- Doi startup publisher: nhan stream hien co, subscribe `camera_sessions`, ghi
+  host status initial co retry ngan, sau do moi start heartbeat interval.
+- Heartbeat failure khong dong peer, khong stop publisher, va retry o chu ky sau.
+- Log Firebase error that vao Console:
+  `[CameraPublisher] Heartbeat write failed` kem `code`, `message`, `name`,
+  `stack` an toan.
+- Payload `camera_hosts/camera_home_001` duoc sanitize, chi ghi primitive hop le
+  va `firebase.database.ServerValue.TIMESTAMP`; khong ghi undefined, function,
+  MediaStream, RTCPeerConnection, Map, DOM element, hay Error object.
+- Them flow session ro rang:
+  `requesting -> offer_created -> answer_created -> connecting -> connected`.
+- Family Viewer hien rieng `requesting`, `waiting_offer`, `answering`,
+  `connecting`, `connected` thay vi chi doi video chung chung.
+- Bo sung rules proposal `.indexOn: ["hostDeviceId"]` cho query
+  `camera_sessions.orderByChild("hostDeviceId").equalTo("camera_home_001")`.
+
+## Files sua
+
+- `tsunagari-care/src/js/webrtc-signaling.js`
+- `tsunagari-care/fall-camera.js`
+- `tsunagari-care/src/js/family-view.js`
+- `docs/camera-streaming-rules.md`
+- `PROJECT_HISTORY.md`
+
+## Checks
+
+- `node --check tsunagari-care/fall-camera.js`
+- `node --check tsunagari-care/src/js/webrtc-signaling.js`
+- `node --check tsunagari-care/src/js/family-view.js`
+- `git diff HEAD --check`
+- `git grep -n "heartbeat_failed" -- tsunagari-care`
+- `git grep -n "getUserMedia" -- tsunagari-care`
+- `git diff -- tsunagari-care/fall-camera.css`
+
+## Manual test can chay
+
+- Tab 1: `http://127.0.0.1:5500/tsunagari-care/fall-camera.html`
+- Tab 2: `http://127.0.0.1:5500/tsunagari-care/family-view.html`
+- RTDB ky vong co `camera_hosts/camera_home_001` va
+  `camera_sessions/{sessionId}`.
+- Session ky vong di qua:
+  `requesting -> offer_created -> answer_created -> connecting -> connected`.
+- Neu van fail, Console se hien Firebase error that de xac dinh rules/index,
+  permission, network, hoac SDK issue.
+
+## Gioi han
+
+- Chua deploy Firebase Rules.
+- Chua chay browser test hai thiet bi that trong session nay.
+- Backend khong bi sua.
+- Khong ghi secret.
+
+# 2026-08-05 02:09 +09:00 - Family Viewer UI/UX redesign only
+
+## Muc tieu
+
+- Thiet ke lai Family Viewer de nhin nhu mot phan chinh thuc cua
+  TsunagariCare.
+- Tap trung vao giao dien nguoi nha: sach, nhe, than thien, mobile-first va
+  phu hop dashboard cham soc suc khoe.
+- Chi sua UI/UX; khong thay doi WebRTC signaling, Firebase paths/query,
+  heartbeat, session lifecycle, Fall Detection, backend, dashboard chinh, hoac
+  schema.
+
+## Design system
+
+- Them token CSS rieng cho Family Viewer:
+  `--color-primary`, `--color-primary-dark`, `--color-primary-soft`,
+  `--color-bg`, `--color-surface`, `--color-surface-muted`, `--color-text`,
+  `--color-text-muted`, `--color-border`, `--color-success`,
+  `--color-warning`, `--color-danger`, `--radius-sm`, `--radius-md`,
+  `--radius-lg`, `--shadow-sm`, `--shadow-md`, `--container-width`.
+- Mau dung tinh than TsunagariCare: nen xanh xam rat nhe, trang, xanh ngoc,
+  xanh an toan, vang cam canh bao va do mem cho nguy hiem.
+- Khong import font ngoai; dung system stack voi `Inter`, `Noto Sans JP`,
+  `Segoe UI`, `sans-serif`.
+
+## UI thay doi
+
+- Header thanh product header co brand mark, `TsunagariCare Family`,
+  `Chami Care`, language segmented control, overall status va last updated.
+- Camera card duoc dat noi bat tren cung voi video 16:9, nen toi, badges,
+  reconnect/fullscreen buttons va 3 info chip cho Camera Host, heartbeat,
+  connection.
+- Status summary dung 2x2 metric cards cho Chami, Camera Host, Fall Detection
+  va Safety Level.
+- Environment card dung metric cards cho outdoor temperature, weather, indoor
+  temperature va humidity; indoor sensor hien state "no sensor" dep hon thay vi
+  trong nhu loi.
+- Alerts/Medicine/Health cards duoc lam gon voi accent dot, badges, scroll noi
+  bo khi can va empty states co icon.
+- Health symptom UI map cac raw key pho bien nhu `chest_pain`, `headache`,
+  `dizziness` sang label theo ngon ngu; fallback thay underscore bang space.
+
+## Responsive va accessibility
+
+- Desktop: max width 1220px, camera tren cung, status/environment 2 cot, history
+  cards 3 cot.
+- Tablet: history xuong 2 cot/1 cot hop ly.
+- Mobile: mot cot, buttons du lon, camera full width, khong horizontal scroll
+  theo CSS.
+- Them skip link i18n, aria-label i18n cho remote video/history, focus-visible
+  ro, contrast nhe, va `prefers-reduced-motion`.
+
+## Files sua
+
+- `tsunagari-care/family-view.html`
+- `tsunagari-care/src/css/family-view.css`
+- `tsunagari-care/src/js/family-view.js`
+- `PROJECT_HISTORY.md`
+
+## Checks
+
+- `node --check tsunagari-care/src/js/family-view.js` passed.
+- Search UI files khong co `getUserMedia` hoac `getDisplayMedia`.
+- Search UI files khong co secret token/Admin credential moi.
+- Cac hook ID JS nhu `remote-video`, `video-placeholder`, `retry-camera`,
+  `fullscreen-camera`, `camera-state-badge`, `connection-state-badge`,
+  `alerts-list`, `medicine-list`, `health-list` duoc giu.
+
+## Test chua chay
+
+- Chua chay browser test that o desktop/tablet/mobile.
+- Chua test remote camera stream that sau redesign.
+
+## Ghi chu
+
+- Cac diff o `fall-camera.html`, `fall-camera.js`, va
+  `webrtc-signaling.js` la thay doi tu phase WebRTC truoc; UI phase nay khong
+  sua cac file do.
+- Khong commit, khong push, khong ghi secret.

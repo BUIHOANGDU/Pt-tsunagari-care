@@ -107,6 +107,9 @@
   let currentChamiCommandId = null;
   let currentFallFlowId = null;
   let fallConfirmedCareEventWritten = false;
+  let fallCameraPublisher = null;
+  const fallCameraPublisherUnsubscribes = [];
+  const fallCameraPublisherErrorCounts = new Map();
 
   function clamp(value, min, max) {
     return Math.min(max, Math.max(min, value));
@@ -250,6 +253,110 @@
     }
 
     console.log("FallCamera:", message);
+  }
+
+  function hasLiveFallCameraStream() {
+    return Boolean(
+      stream &&
+        typeof stream.getVideoTracks === "function" &&
+        stream.getVideoTracks().some((track) => track.readyState === "live"),
+    );
+  }
+
+  function shouldLogPublisherError(reason) {
+    const currentCount = fallCameraPublisherErrorCounts.get(reason) || 0;
+    const nextCount = currentCount + 1;
+    fallCameraPublisherErrorCounts.set(reason, nextCount);
+    return nextCount === 1 || nextCount % 6 === 0;
+  }
+
+  async function ensureFallCameraPublisher() {
+    if (fallCameraPublisher) return fallCameraPublisher;
+
+    if (!window.TsunagariCameraSignaling) {
+      logCameraEvent("Remote viewing signaling module is not loaded", "warn");
+      return null;
+    }
+
+    if (!hasLiveFallCameraStream()) {
+      logCameraEvent("Remote viewing skipped: camera stream is not live", "warn");
+      return null;
+    }
+
+    fallCameraPublisher =
+      window.TsunagariCameraSignaling.createCameraHostController({
+        hostDeviceId: "camera_home_001",
+        unsubscribes: fallCameraPublisherUnsubscribes,
+        onViewerCount: (count) => {
+          logCameraEvent(`Remote viewers: ${count}`);
+        },
+        onOfferCreated: (sessionId) => {
+          logCameraEvent(`Remote viewing offer created: ${sessionId}`);
+        },
+        onPeerState: (sessionId, state) => {
+          logCameraEvent(`Remote viewer ${sessionId}: ${state}`);
+        },
+        onError: (reason, error) => {
+          if (!shouldLogPublisherError(reason)) return;
+          logCameraEvent(
+            `Remote viewing signaling failed: ${reason}`,
+            "warn",
+            error,
+          );
+        },
+      });
+
+    const initialStatusWritten = await fallCameraPublisher.start(() => stream);
+    if (!initialStatusWritten) {
+      logCameraEvent(
+        "Remote viewing publisher started with degraded host status",
+        "warn",
+      );
+    }
+    return fallCameraPublisher;
+  }
+
+  async function startFallCameraPublisher() {
+    try {
+      const publisher = await ensureFallCameraPublisher();
+      if (!publisher || !stream) return;
+
+      const statusWritten = await publisher.setStreamReady(true, {
+        online: true,
+        fallDetectionActive: true,
+      });
+      if (!statusWritten) {
+        logCameraEvent("Remote viewing not ready: host status write failed", "warn");
+        return;
+      }
+      logCameraEvent("Remote viewing ready from Fall Detection camera");
+    } catch (error) {
+      logCameraEvent("Remote viewing start failed", "warn", error);
+    }
+  }
+
+  async function stopFallCameraPublisher({ offline = false } = {}) {
+    if (!fallCameraPublisher) return;
+
+    try {
+      if (offline) {
+        await fallCameraPublisher.shutdown();
+        fallCameraPublisher = null;
+        fallCameraPublisherUnsubscribes.splice(0).forEach((unsubscribe) => {
+          unsubscribe();
+        });
+        return;
+      }
+
+      await fallCameraPublisher.stopPeers("closed");
+      await fallCameraPublisher.setStreamReady(false, {
+        online: true,
+        fallDetectionActive: false,
+      });
+      logCameraEvent("Remote viewing stopped");
+    } catch (error) {
+      logCameraEvent("Remote viewing stop failed", "warn", error);
+    }
   }
 
   function getFirebaseService() {
@@ -1280,6 +1387,7 @@
       );
       addLog("Camera started");
       runCameraStatusSync(syncCameraOnline, "Firestore camera status: online");
+      startFallCameraPublisher();
       resizeOverlay();
 
       initPoseLandmarker()
@@ -1295,9 +1403,10 @@
     }
   }
 
-  function stopCamera() {
+  async function stopCamera({ offline = false } = {}) {
     if (!stream) return;
 
+    await stopFallCameraPublisher({ offline });
     stopPoseDetection();
     stream.getTracks().forEach((track) => track.stop());
     stream = null;
@@ -1357,13 +1466,13 @@
   }
 
   startButton.addEventListener("click", startCamera);
-  stopButton.addEventListener("click", stopCamera);
+  stopButton.addEventListener("click", () => stopCamera());
   testFallAlertButton.addEventListener("click", handleManualTestFallAlert);
   resetFallStateButton.addEventListener("click", handleManualResetFallState);
   clearLogButton.addEventListener("click", clearLocalLog);
   video.addEventListener("loadedmetadata", resizeOverlay);
   window.addEventListener("resize", resizeOverlay);
-  window.addEventListener("beforeunload", stopCamera);
+  window.addEventListener("beforeunload", () => stopCamera({ offline: true }));
 
   setCameraOnline(false);
   setFallCommandStatus("");
